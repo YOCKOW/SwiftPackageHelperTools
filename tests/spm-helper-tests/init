@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+
+################################################################################
+# init
+#   © 2025 YOCKOW.
+#     Licensed under MIT License.
+#     See "LICENSE.txt" for more information.
+################################################################################
+
+set -eu
+
+local -r helperTestsDir=$(cd "$(dirname "$0")" && pwd)
+local -r testsDir=$(dirname "$helperTestsDir")
+local -r repoDir=$(dirname "$testsDir")
+local -r helperBinDir="${repoDir}/bin"
+local -r testPackageDir="${repoDir}/HelperTestPackage"
+
+PATH="${helperBinDir}:$PATH"
+
+SSTExport PATH "$PATH"
+SSTExport HT_PACKAGE_DIR "$testPackageDir"
