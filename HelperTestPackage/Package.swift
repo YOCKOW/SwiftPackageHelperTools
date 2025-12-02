@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "HelperTestPackage",
     dependencies: [
-        .package(url: "https://github.com/YOCKOW/SwiftRanges.git", from: "3.2.2"),
+        .package(url: "https://github.com/YOCKOW/SwiftCGIResponder.git", from: "0.12.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -14,7 +14,7 @@ let package = Package(
         .executableTarget(
             name: "HelperTestPackage",
             dependencies: [
-                "SwiftRanges",
+                "SwiftCGIResponder",
             ]
         ),
     ]
