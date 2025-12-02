@@ -27,6 +27,7 @@ declare -A commonParsedArguments=(
 declare -r -A subcommands=(
   [dep-json]='Prints the resolved dependency graph with JSON format.
               This is equivalent to `swift package show-dependencies --format json`.'
+  [dep-pretty-dot]='Prints the resolved dependency graph with DOT format.'
 )
 
 
@@ -75,6 +76,13 @@ function isVerbose() {
   return 1
 }
 
+function shouldViewHelp() {
+  if isTrue "${commonParsedArguments[help]}"; then
+    return 0
+  fi
+  return 1
+}
+
 function verbosePrint() {
   if isVerbose; then
     printInfo "$1"
@@ -93,7 +101,7 @@ function requireCommand() {
   fi
 }
 
-function printHelp() {
+function viewHelp() {
   echo "[OVERVIEW]"
   echo "Helper tool for Swift packages."
   echo
@@ -110,6 +118,13 @@ function printHelp() {
       echo "        ${=${=line}}"
     done
   done
+  echo
+
+  echo "[COMMON OPTIONS]"
+  echo "    --package-path <string>:"
+  echo "        Path to the directory that contains Package.swift. (Default: .)"
+  echo "    --scratch-path <string>:"
+  echo "        Path to the scratch directory. (Default: .build)"
 }
 
 
@@ -129,6 +144,14 @@ function dep-json() {
     )
   fi
   swift package $swiftPackageShowDependenciesArguments
+}
+
+function dep-pretty-dot() {
+  if shouldViewHelp; then
+    echo "[OVERVIEW]"
+    echo "${subcommands[dep-pretty-dot]}"
+    return 0
+  fi
 }
 
 
@@ -178,13 +201,13 @@ fi
 
 if [[ -z "$subcommandName" ]]; then
   verbosePrint "No subcommand name was given."
-  printHelp
+  viewHelp
   exit 0
 fi
 
 if [[ -z "${subcommands[(i)$subcommandName]}" ]]; then
   printError "Unexpected subcommand name: $subcommandName"
-  printHelp 1>&2
+  viewHelp 1>&2
   exit 1
 fi
 
