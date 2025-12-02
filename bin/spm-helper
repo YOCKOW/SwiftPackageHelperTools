@@ -1,0 +1,191 @@
+#!/usr/bin/env zsh
+
+###############################################################################
+#
+# spm-helper
+#
+# © 2025 YOCKOW.
+#   Licensed under MIT License.
+#   See "LICENSE.txt" for more information.
+#
+################################################################################
+
+set -eu
+
+# Constants/Variables
+################################################################################
+
+declare -r commandName=$(basename "$0")
+declare -a commandArguments=($@)
+declare subcommandName=""
+declare -A commonParsedArguments=(
+  [help]="false"
+  [package-path]="."
+  [scratch-path]=".build"
+  [verbose]="false"
+)
+declare -r -A subcommands=(
+  [dep-json]='Prints the resolved dependency graph with JSON format.
+              This is equivalent to `swift package show-dependencies --format json`.'
+)
+
+
+# Internal Functions
+################################################################################
+
+function printError() {
+  local -r message="$1"
+  printf '\033[31merror:\033[m %s\n' "$message" 1>&2
+}
+
+function printWarning() {
+  local -r message="$1"
+  printf '\033[33mwarning:\033[m %s\n' "$message" 1>&2
+}
+
+function printInfo() {
+  local -r message="$1"
+  printf '\033[2minfo:\033[m %s\n' "$message" 1>&2
+}
+
+function fatalError() {
+  printError "$1"
+  exit 1
+}
+
+function assertionFailed() {
+  local -r message="$1"
+  local -r lineNumber="${2:-0}"
+  echo "❗ Assertion failed (bug): line ${lineNumber}: $message" 1>&2
+  exit 1
+}
+
+function isTrue() {
+  local -r booleanValue="${1:-false}"
+  if [[ "${(L)booleanValue}" == "true" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+function isVerbose() {
+  if isTrue "${commonParsedArguments[verbose]}"; then
+    return 0
+  fi
+  return 1
+}
+
+function verbosePrint() {
+  if isVerbose; then
+    printInfo "$1"
+  fi
+}
+
+function requireCommand() {
+  local -r requiredCommandName="$1"
+  local -r howToGet="${2:-}"
+  if ! command -v "$requiredCommandName" 1>/dev/null; then
+    printError "Missing required command: ${requiredCommandName}"
+    if [[ -n "$howToGet" ]]; then
+      printInfo "Try this: ${howToGet}"
+    fi
+    exit 1
+  fi
+}
+
+function printHelp() {
+  echo "[OVERVIEW]"
+  echo "Helper tool for Swift packages."
+  echo
+  echo "[SYNTAX]"
+  echo "$commandName <subcommand> [options]"
+  echo
+
+  echo "[SUBCOMMANDS]"
+  local sub
+  local line
+  for sub in ${(@ok)subcommands}; do
+    echo "    $sub:"
+    for line in ${(ps:\n:)subcommands[$sub]}; do
+      echo "        ${=${=line}}"
+    done
+  done
+}
+
+
+# Subcommands
+################################################################################
+
+function dep-json() {
+  local -a swiftPackageShowDependenciesArguments=(
+    --package-path "${commonParsedArguments[package-path]}"
+    --scratch-path "${commonParsedArguments[scratch-path]}"
+    show-dependencies
+    --format json
+  )
+  if isVerbose; then
+    swiftPackageShowDependenciesArguments=(
+      --verbose $swiftPackageShowDependenciesArguments
+    )
+  fi
+  swift package $swiftPackageShowDependenciesArguments
+}
+
+
+# Prepare
+################################################################################
+
+requireCommand swift "See https://www.swift.org/install/"
+
+function __parseCommonArguments() {
+  local -A parsedArguments=()
+  zparseopts -D -E -M -A parsedArguments -- \
+    -help \
+    -scratch-path: \
+    -package-path: \
+    v -verbose=v
+  commandArguments=($@)
+
+  if [[ -n "${parsedArguments[(i)--help]}" ]]; then
+    commonParsedArguments[help]="true"
+  fi
+
+  if [[ -n "${parsedArguments[(i)--scratch-path]}" ]]; then
+    commonParsedArguments[scratch-path]="${parsedArguments[--scratch-path]#=}"
+  fi
+
+  if [[ -n "${parsedArguments[(i)--package-path]}" ]]; then
+    commonParsedArguments[package-path]="${parsedArguments[--package-path]#=}"
+  fi
+
+  if [[ -n "${parsedArguments[(i)-v]}" ]]; then
+    commonParsedArguments[verbose]="true"
+    verbosePrint "Verbose mode: on"
+  fi
+}
+__parseCommonArguments $commandArguments
+
+if [[ ${#commandArguments[@]} -lt 1 ]]; then
+  commonParsedArguments[help]="true"
+else
+  subcommandName="${commandArguments[1]}"
+  commandArguments=($commandArguments[2,-1]) # shift
+fi
+
+
+# Execute
+################################################################################
+
+if [[ -z "$subcommandName" ]]; then
+  verbosePrint "No subcommand name was given."
+  printHelp
+  exit 0
+fi
+
+if [[ -z "${subcommands[(i)$subcommandName]}" ]]; then
+  printError "Unexpected subcommand name: $subcommandName"
+  printHelp 1>&2
+  exit 1
+fi
+
+$subcommandName $commandArguments
