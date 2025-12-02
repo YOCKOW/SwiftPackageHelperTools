@@ -101,6 +101,15 @@ function requireCommand() {
   fi
 }
 
+function viewCommonOptions() {
+  echo "[COMMON OPTIONS]"
+  echo "    --package-path <string>:"
+  echo "        Path to the directory that contains Package.swift. (Default: .)"
+  echo "    --scratch-path <string>:"
+  echo "        Path to the scratch directory. (Default: .build)"
+  echo
+}
+
 function viewHelp() {
   echo "[OVERVIEW]"
   echo "Helper tool for Swift packages."
@@ -120,11 +129,7 @@ function viewHelp() {
   done
   echo
 
-  echo "[COMMON OPTIONS]"
-  echo "    --package-path <string>:"
-  echo "        Path to the directory that contains Package.swift. (Default: .)"
-  echo "    --scratch-path <string>:"
-  echo "        Path to the scratch directory. (Default: .build)"
+  viewCommonOptions
 }
 
 
@@ -150,6 +155,8 @@ function dep-pretty-dot() {
   if shouldViewHelp; then
     echo "[OVERVIEW]"
     echo "${subcommands[dep-pretty-dot]}"
+    echo 
+    viewCommonOptions
     return 0
   fi
 }
