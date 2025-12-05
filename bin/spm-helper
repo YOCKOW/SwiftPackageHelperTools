@@ -27,6 +27,7 @@ declare -A commonParsedArguments=(
 declare -r -A subcommands=(
   [dep-json]='Prints the resolved dependency graph with JSON format.
               This is equivalent to `swift package show-dependencies --format json`.'
+  [dep-pretty-dot]='Prints the resolved dependency graph with DOT format.'
 )
 
 
@@ -75,6 +76,13 @@ function isVerbose() {
   return 1
 }
 
+function shouldViewHelp() {
+  if isTrue "${commonParsedArguments[help]}"; then
+    return 0
+  fi
+  return 1
+}
+
 function verbosePrint() {
   if isVerbose; then
     printInfo "$1"
@@ -93,7 +101,16 @@ function requireCommand() {
   fi
 }
 
-function printHelp() {
+function viewCommonOptions() {
+  echo "[COMMON OPTIONS]"
+  echo "    --package-path <string>:"
+  echo "        Path to the directory that contains Package.swift. (Default: .)"
+  echo "    --scratch-path <string>:"
+  echo "        Path to the scratch directory. (Default: .build)"
+  echo
+}
+
+function viewHelp() {
   echo "[OVERVIEW]"
   echo "Helper tool for Swift packages."
   echo
@@ -110,6 +127,9 @@ function printHelp() {
       echo "        ${=${=line}}"
     done
   done
+  echo
+
+  viewCommonOptions
 }
 
 
@@ -129,6 +149,136 @@ function dep-json() {
     )
   fi
   swift package $swiftPackageShowDependenciesArguments
+}
+
+function dep-pretty-dot() {
+  if shouldViewHelp; then
+    echo "[OVERVIEW]"
+    echo "${subcommands[dep-pretty-dot]}"
+    echo 
+    viewCommonOptions
+    return 0
+  fi
+
+  local -r tmpFilePath=$(mktemp)
+  dep-json >"$tmpFilePath"
+
+  verbosePrint "Converting JSON to DOT..."
+  env \
+    VERBOSE_MODE="${commonParsedArguments[verbose]}" \
+    JSON_PATH="$tmpFilePath" \
+    swift - <<'____DOT_GENERATOR_SWIFT_CODE____'
+
+import Foundation
+
+let env = ProcessInfo.processInfo.environment
+let isVerbose: Bool = env["VERBOSE_MODE"]?.lowercased() == "true"
+let jsonPath = env["JSON_PATH"]!
+let json = try String(contentsOfFile: jsonPath, encoding: .utf8)
+
+func verbosePrint(_ message: String) {
+  guard isVerbose else { return }
+  try? FileHandle.standardError.write(
+    contentsOf: Data("\u{1B}[2minfo:\u{1B}[m \(message)\n".utf8)
+  )
+}
+
+struct PackageInfo: Decodable {
+  let identity: String
+  let name: String
+  let url: String
+  let version: String
+  let path: String
+  let dependencies: [PackageInfo]
+}
+
+struct DependencyLink {
+  let from: PackageInfo
+  let to: PackageInfo
+}
+
+verbosePrint("Decoding JSON...")
+let decoder = JSONDecoder()
+let rootPackage = try decoder.decode(PackageInfo.self, from: Data(json.utf8))
+
+var allPackages: Array<PackageInfo> = []
+var allLinks: Array<DependencyLink> = []
+
+func appendPackage(_ package: PackageInfo) {
+  if allPackages.allSatisfy({ $0.identity != package.identity }) {
+    verbosePrint("Package: \(package.identity)(\(package.name))")
+    allPackages.append(package)
+  }
+}
+
+func appendLink(from: PackageInfo, to: PackageInfo) {
+  if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
+    verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
+    allLinks.append(DependencyLink(from: from, to: to))
+  }
+}
+
+func walkDependencies(of package: PackageInfo) {
+  appendPackage(package)
+  for dependency in package.dependencies {
+    appendLink(from: package, to: dependency)
+    walkDependencies(of: dependency)
+  }
+}
+
+walkDependencies(of: rootPackage)
+
+var terminals = allPackages
+for link in allLinks {
+  terminals.removeAll(where: { $0.identity == link.from.identity })
+}
+verbosePrint("Terminal packages: \(terminals.map(\.identity).joined(separator: ", "))")
+
+verbosePrint("Generating DOT graph...")
+GENERATE_DOT: do {
+  print("digraph \(rootPackage.identity)DependenciesGraph {")
+
+  // Define Nodes
+  for package in allPackages.sorted(by: { $0.identity < $1.identity }) {
+    if package.identity == rootPackage.identity {
+      print(#"  "\#(package.identity)" [ label="\#(package.name)", shape=polygon ]"#)
+    } else {
+      print(#"  "\#(package.identity)" [ label="\#(package.name)\#\n@\#(package.version)", shape=oval, URL="\#(package.url)" ]"#)
+    }
+  }
+  print("")
+
+  // Links
+  let linkSorter: (DependencyLink, DependencyLink) -> Bool = {
+    if $0.from.identity < $1.from.identity {
+      return true
+    }
+    if $0.from.identity > $1.from.identity {
+      return false
+    }
+    if $0.to.identity < $1.to.identity {
+      return true
+    }
+    return false
+  }
+  for link in allLinks.sorted(by: linkSorter) {
+    print(#"  "\#(link.from.identity)" -> "\#(link.to.identity)""#)
+  }
+  print("")
+
+  // Ranks
+  print(#"  { rank=min; "\#(rootPackage.identity)" }"#)
+  print("  { rank=max;")
+  for terminal in terminals.sorted(by: { $0.identity < $1.identity }) {
+    print(#"    "\#(terminal.identity)""#)
+  }
+  print("  }")
+
+  // End of graph
+  print("}")
+}
+
+____DOT_GENERATOR_SWIFT_CODE____
 }
 
 
@@ -178,13 +328,13 @@ fi
 
 if [[ -z "$subcommandName" ]]; then
   verbosePrint "No subcommand name was given."
-  printHelp
+  viewHelp
   exit 0
 fi
 
 if [[ -z "${subcommands[(i)$subcommandName]}" ]]; then
   printError "Unexpected subcommand name: $subcommandName"
-  printHelp 1>&2
+  viewHelp 1>&2
   exit 1
 fi
 
