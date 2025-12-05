@@ -1,0 +1,15 @@
+#!/usr/bin/env zsh
+
+################################################################################
+# test-dot
+#   © 2025 YOCKOW.
+#     Licensed under MIT License.
+#     See "LICENSE.txt" for more information.
+################################################################################
+
+set -u
+
+declare -r dotFormat="$(spm-helper dep-pretty-dot --package-path "$HT_PACKAGE_DIR")"
+
+SSTAssertStringMatch "$dotFormat" '"helpertestpackage"' -l ${(%):-%I}
+SSTAssertStringMatch "$dotFormat" '"swiftranges"' -l ${(%):-%I}
