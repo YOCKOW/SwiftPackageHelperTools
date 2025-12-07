@@ -1,0 +1,15 @@
+#!/usr/bin/env zsh
+
+################################################################################
+# test-mermaid
+#   © 2025 YOCKOW.
+#     Licensed under MIT License.
+#     See "LICENSE.txt" for more information.
+################################################################################
+
+set -u
+
+declare -r mermaidFormat="$(spm-helper dep-mermaid --package-path "$HT_PACKAGE_DIR")"
+
+SSTAssertStringMatch "$mermaidFormat" 'helpertestpackage --> swiftcgiresponder' -l ${(%):-%I}
+SSTAssertStringMatch "$mermaidFormat" 'helpertestpackage\["HelperTestPackage"\]' -l ${(%):-%I}
