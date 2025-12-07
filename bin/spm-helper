@@ -28,6 +28,7 @@ declare -r -A subcommands=(
   [dep-json]='Prints the resolved dependency graph with JSON format.
               This is equivalent to `swift package show-dependencies --format json`.'
   [dep-pretty-dot]='Prints the resolved dependency graph with DOT format.'
+  [dep-mermaid]='Prints the resolved dependency graph with Mermaid format.'
 )
 
 
@@ -248,6 +249,20 @@ func walkDependencies(of package: PackageInfo) {
 
 walkDependencies(of: rootPackage)
 
+allPackages.sort(by: { $0.identity < $1.identity })
+allLinks.sort(by: {
+  if $0.from.identity < $1.from.identity {
+    return true
+  }
+  if $0.from.identity > $1.from.identity {
+    return false
+  }
+  if $0.to.identity < $1.to.identity {
+    return true
+  }
+  return false
+})
+
 var terminals = allPackages
 for link in allLinks {
   terminals.removeAll(where: { $0.identity == link.from.identity })
@@ -260,7 +275,7 @@ func printDOT() {
   print("digraph \(rootPackage.identity)DependenciesGraph {")
 
   // Define Nodes
-  for package in allPackages.sorted(by: { $0.identity < $1.identity }) {
+  for package in allPackages {
     if package.identity == rootPackage.identity {
       print(#"  "\#(package.identity)" [ label="\#(package.name)", shape=polygon ]"#)
     } else {
@@ -270,19 +285,7 @@ func printDOT() {
   print("")
 
   // Links
-  let linkSorter: (DependencyLink, DependencyLink) -> Bool = {
-    if $0.from.identity < $1.from.identity {
-      return true
-    }
-    if $0.from.identity > $1.from.identity {
-      return false
-    }
-    if $0.to.identity < $1.to.identity {
-      return true
-    }
-    return false
-  }
-  for link in allLinks.sorted(by: linkSorter) {
+  for link in allLinks {
     print(#"  "\#(link.from.identity)" -> "\#(link.to.identity)""#)
   }
   print("")
@@ -299,9 +302,47 @@ func printDOT() {
   print("}")
 }
 
+func printMermaid() {
+  MERMAID_HEADER: do {
+    print("---")
+    print("title: \(rootPackage.name) Dependencies")
+    print("---")
+  }
+
+  print("flowchart TD")
+
+  // Define Nodes
+  for package in allPackages {
+    if package.identity == rootPackage.identity {
+      print(#"  \#(package.identity)["\#(package.name)"]"#)
+    } else {
+      print(#"  \#(package.identity)(["\#(package.name)<br>@\#(package.version)"])"#)
+    }
+  }
+  print("")
+
+  // URLs
+  for package in allPackages where package.identity != rootPackage.identity {
+    print(#"  click \#(package.identity) href "\#(package.url)""#)
+  }
+  print("")
+
+  // Links
+  for link in allLinks {
+    let arrow: String = (
+      terminals.contains(where: {
+        $0.identity == link.to.identity
+      }) ? "---->"
+      : "-->"
+    )
+    print("  \(link.from.identity) \(arrow) \(link.to.identity)")
+  }
+  print("")
+}
+
 switch outputFormat {
 case .dot: printDOT()
-case .mermaid: fatalError("Unimplemented.")
+case .mermaid: printMermaid()
 }
 
 ____JSON_CONVERTER_SWIFT_CODE____
@@ -316,9 +357,19 @@ function dep-pretty-dot() {
     return 0
   fi
 
-  local -r tmpFilePath=$(mktemp)
-  dep-json >"$tmpFilePath"
   __convert-json --format DOT
+}
+
+function dep-mermaid() {
+  if shouldViewHelp; then
+    echo "[OVERVIEW]"
+    echo "${subcommands[dep-mermaid]}"
+    echo
+    viewCommonOptions
+    return 0
+  fi
+
+  __convert-json --format Mermaid
 }
 
 
