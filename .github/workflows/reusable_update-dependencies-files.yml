@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         default: ""
+      mermaid-file:
+        description: "The path to the file with Mermaid format to be saved."
+        type: string
+        required: false
+        default: ""
       commit-pattern:
         description: "How to commit the generated files. Valid value is `direct` or `via-pr`."
         type: string
@@ -30,7 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SPM_HELPER_REPO_URL: "https://GitHub.com/YOCKOW/SwiftPackageHelperTools.git"
+      PACKAGE_PATH: ${{ inputs.package-path }}
       DOT_FILE: ${{ inputs.dot-file }}
+      MERMAID_FILE: ${{ inputs.mermaid-file }}
       COMMIT_PATTERN: ${{ inputs.commit-pattern }}
       GIT_USER_NAME: "github-actions[bot]"
       GIT_USER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
@@ -50,7 +57,7 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "${DOT_FILE}" ]]; then
+          if [[ -z "${DOT_FILE}${MERMAID_FILE}" ]]; then
             echo "::warning title='No file paths are specified'::This workflow will generate nothing."
           fi
       - name: Install zsh
@@ -80,11 +87,13 @@ jobs:
           git config --local user.name "${GIT_USER_NAME}"
           git config --local user.email "${GIT_USER_EMAIL}"
       - name: Generate DOT file
-        if: ${{ inputs.dot-file != '' }}
-        env:
-          PACKAGE_PATH: ${{ inputs.package-path }}
+        if: ${{ env.DOT_FILE != '' }}
         run: |
           spm-helper dep-pretty-dot --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" >"$DOT_FILE"
+      - name: Generate Mermaid file
+        if: ${{ env.MERMAID_FILE != '' }}
+        run: |
+          spm-helper dep-mermaid --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" >"$MERMAID_FILE"
       - name: Commit Changes
         shell: zsh {0}
         env:
@@ -124,6 +133,7 @@ jobs:
           fi
 
           __commit-file "$DOT_FILE"
+          __commit-file "$MERMAID_FILE"
 
           git fetch origin "$REF_NAME"
           if [[ -z "$(git diff --shortstat "origin/${REF_NAME}..HEAD")" ]]; then

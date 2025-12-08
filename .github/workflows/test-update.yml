@@ -13,6 +13,7 @@ jobs:
       swift-version: "6.2.1"
       package-path: "./HelperTestPackage"
       dot-file: "./sample.dot"
+      mermaid-file: "./sample.mmd"
       commit-pattern: via-pr
     secrets:
       gh-token: ${{ secrets.GITHUB_TOKEN }}
