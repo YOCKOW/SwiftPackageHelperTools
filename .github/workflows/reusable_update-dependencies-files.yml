@@ -1,0 +1,158 @@
+name: Update Files Showing Package Dependencies
+on:
+  workflow_call:
+    inputs:
+      swift-version:
+        description: "The Version of Swift to be used."
+        type: string
+        required: true
+      package-path:
+        description: "The path to the directory of the Swift package."
+        type: string
+        required: false
+        default: "."
+      dot-file:
+        description: "The path to the file with DOT format to be saved."
+        type: string
+        required: false
+        default: ""
+      commit-pattern:
+        description: "How to commit the generated files. Valid value is `direct` or `via-pr`."
+        type: string
+        required: false
+        default: "direct"
+    secrets:
+      gh-token:
+        description: "The value to be set to GH_TOKEN."
+        required: true
+jobs:
+  update-dependencies-files:
+    runs-on: ubuntu-latest
+    env:
+      SPM_HELPER_REPO_URL: "https://GitHub.com/YOCKOW/SwiftPackageHelperTools.git"
+      DOT_FILE: ${{ inputs.dot-file }}
+      COMMIT_PATTERN: ${{ inputs.commit-pattern }}
+      GIT_USER_NAME: "github-actions[bot]"
+      GIT_USER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+      EVENT_NAME: ${{ github.event_name }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Validate parameters
+        run: |
+          if [[ "$EVENT_NAME" != 'push' ]] && [[ "$REF_TYPE" != 'branch' ]]; then
+            echo "::error::This Workflow is supposed to run when a branch is pushed."
+            exit 1
+          fi
+
+          if [[ "$COMMIT_PATTERN" != 'direct' ]] && [[ "$COMMIT_PATTERN" != 'via-pr' ]]; then
+            echo "::error::Invalid value \"${COMMIT_PATTERN}\" for \`commit-pattern\`."
+            exit 1
+          fi
+
+          if [[ -z "${DOT_FILE}" ]]; then
+            echo "::warning title='No file paths are specified'::This workflow will generate nothing."
+          fi
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zsh
+      - name: Install Swift
+        uses: YOCKOW/Action-setup-swift@v1
+        with:
+          swift-version: ${{ inputs.swift-version }}
+      - name: Install spm-helper
+        env:
+          GH_TOKEN: ${{ secrets.gh-token }}
+        run: |
+          set -u
+          declare -r spmHelperRepoDir="$HOME/.spm-helper"
+          gh repo clone \
+            "$SPM_HELPER_REPO_URL" "${spmHelperRepoDir}" \
+            -- -b "v0.0.1" --depth 1
+          echo "${spmHelperRepoDir}/bin" >>"$GITHUB_PATH"
+          echo "SCRATCH_PATH=${spmHelperRepoDir}/.build" >>"$GITHUB_ENV"
+      - name: Check out the repository
+        uses: actions/checkout@v6
+      - name: Configure git
+        run: |
+          set -x
+          git config --local user.name "${GIT_USER_NAME}"
+          git config --local user.email "${GIT_USER_EMAIL}"
+      - name: Generate DOT file
+        if: ${{ inputs.dot-file != '' }}
+        env:
+          PACKAGE_PATH: ${{ inputs.package-path }}
+        run: |
+          spm-helper dep-pretty-dot --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" >"$DOT_FILE"
+      - name: Commit Changes
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ secrets.gh-token }}
+        run: |
+          set -eu
+
+          declare -r dateNow="$(date '+%Y-%m-%d %H:%M:%S%z')"
+          declare -r uuidValue="$(uuidgen)"
+          declare -r repoLink_md="[SwiftPackageHelperTools](${SPM_HELPER_REPO_URL})"
+          declare -r commitMessageFooter=$({
+            echo ""
+            echo "This commit is done by the workflow in ${repoLink_md}."
+            echo "- UUID: $uuidValue"
+            echo "- Date: $dateNow"
+          })
+          declare -a updatedFiles=()
+          declare branchName="$REF_NAME"
+
+          function __commit-file() {
+            local -r filename="$1"
+            if [[ -z "$filename" ]]; then
+              return 0
+            fi
+
+            git add --intent-to-add "$filename"
+            if [[ -n "$(git diff --shortstat HEAD -- "$filename")" ]]; then
+              git add "$filename"
+              git commit -m "Update \"${filename}\".${commitMessageFooter}"
+              updatedFiles+=("$filename")
+            fi
+          }
+
+          if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
+            branchName="spm-helper-$uuidValue"
+            git fetch origin --unshallow
+            git checkout -b "$branchName"
+          fi
+
+          __commit-file "$DOT_FILE"
+
+          git fetch origin "$REF_NAME"
+          if [[ -z "$(git diff --shortstat "origin/${REF_NAME}..HEAD")" ]]; then
+            echo "::notice::No files to commit."
+            exit 0
+          fi
+
+          git push origin --set-upstream "${branchName}:${branchName}"
+
+          if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
+            declare -r -a prBody=$({
+              echo "This PR was opend by the workflow in ${repoLink_md}."
+              echo "- UUID: $uuidValue"
+              echo "- Date: $dateNow"
+              echo ""
+              echo "**Updated files**"
+              local updatedFile
+              for updatedFile in $updatedFiles; do
+                echo "- $updatedFile"
+              done
+            })
+
+            declare prURL
+            prURL=$(
+              gh pr create \
+              --base "${REF_NAME}" --head "${branchName}" \
+              --title "Update the dependencies files. (${dateNow})" \
+              --body "${prBody}"
+            )
+            gh pr merge --merge --auto --delete-branch "$prURL"
+          fi
