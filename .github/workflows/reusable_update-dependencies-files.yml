@@ -134,8 +134,8 @@ jobs:
           git push origin --set-upstream "${branchName}:${branchName}"
 
           if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
-            declare -r -a prBody=$({
-              echo "This PR was opend by the workflow in ${repoLink_md}."
+            declare -r prBody=$({
+              echo "This PR is opend by the workflow in ${repoLink_md}."
               echo "- UUID: $uuidValue"
               echo "- Date: $dateNow"
               echo ""
