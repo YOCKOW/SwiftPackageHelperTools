@@ -96,7 +96,6 @@ jobs:
           declare -r uuidValue="$(uuidgen)"
           declare -r repoLink_md="[SwiftPackageHelperTools](${SPM_HELPER_REPO_URL})"
           declare -r commitMessageFooter=$({
-            echo ""
             echo "This commit is done by the workflow in ${repoLink_md}."
             echo "- UUID: $uuidValue"
             echo "- Date: $dateNow"
@@ -113,7 +112,7 @@ jobs:
             git add --intent-to-add "$filename"
             if [[ -n "$(git diff --shortstat HEAD -- "$filename")" ]]; then
               git add "$filename"
-              git commit -m "Update \"${filename}\".${commitMessageFooter}"
+              git commit -m "Update \"${filename}\"."$'\n\n'"${commitMessageFooter}"
               updatedFiles+=("$filename")
             fi
           }
