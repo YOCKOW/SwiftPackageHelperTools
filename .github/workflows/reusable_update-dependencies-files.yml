@@ -123,6 +123,8 @@ jobs:
               git add "$filename"
               git commit -m "Update \"${filename}\"."$'\n\n'"${commitMessageFooter}"
               updatedFiles+=("$filename")
+            else
+              echo "::notice::\"${filename}\" is up-to-date."
             fi
           }
 
