@@ -16,6 +16,11 @@ on:
         type: string
         required: false
         default: ""
+      dot-derived-svg-file:
+        description: "The path to the file with SVG format that is derived from DOT format."
+        type: string
+        required: false
+        default: ""
       mermaid-file:
         description: "The path to the file with Mermaid format to be saved."
         type: string
@@ -37,6 +42,7 @@ jobs:
       SPM_HELPER_REPO_URL: "https://GitHub.com/YOCKOW/SwiftPackageHelperTools.git"
       PACKAGE_PATH: ${{ inputs.package-path }}
       DOT_FILE: ${{ inputs.dot-file }}
+      DOT_DERIVED_SVG_FILE: ${{ inputs.dot-derived-svg-file }}
       MERMAID_FILE: ${{ inputs.mermaid-file }}
       COMMIT_PATTERN: ${{ inputs.commit-pattern }}
       GIT_USER_NAME: "github-actions[bot]"
@@ -47,6 +53,8 @@ jobs:
     steps:
       - name: Validate parameters
         run: |
+          set -eu
+
           if [[ "$EVENT_NAME" != 'push' ]] && [[ "$REF_TYPE" != 'branch' ]]; then
             echo "::error::This Workflow is supposed to run when a branch is pushed."
             exit 1
@@ -57,13 +65,18 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "${DOT_FILE}${MERMAID_FILE}" ]]; then
+          if [[ -z "${DOT_FILE}${DOT_DERIVED_SVG_FILE}${MERMAID_FILE}" ]]; then
             echo "::warning title='No file paths are specified'::This workflow will generate nothing."
           fi
       - name: Install zsh
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zsh
+      - name: Install Graphviz
+        if: ${{ env.DOT_DERIVED_SVG_FILE != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends graphviz
       - name: Install Swift
         uses: YOCKOW/Action-setup-swift@v1
         with:
@@ -90,6 +103,10 @@ jobs:
         if: ${{ env.DOT_FILE != '' }}
         run: |
           spm-helper dep-pretty-dot --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" >"$DOT_FILE"
+      - name: Generate SVG file from DOT
+        if: ${{ env.DOT_DERIVED_SVG_FILE != '' }}
+        run: |
+          spm-helper dep-pretty-dot --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" | dot -Tsvg >"$DOT_DERIVED_SVG_FILE"
       - name: Generate Mermaid file
         if: ${{ env.MERMAID_FILE != '' }}
         run: |
@@ -135,6 +152,7 @@ jobs:
           fi
 
           __commit-file "$DOT_FILE"
+          __commit-file "$DOT_DERIVED_SVG_FILE"
           __commit-file "$MERMAID_FILE"
 
           git fetch origin "$REF_NAME"
