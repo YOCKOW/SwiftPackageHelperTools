@@ -26,6 +26,11 @@ on:
         type: string
         required: false
         default: ""
+      mermaid-derived-svg-file:
+        description: "The path to the file with SVG format that is derived from Mermaid format."
+        type: string
+        required: false
+        default: ""
       commit-pattern:
         description: "How to commit the generated files. Valid value is `direct` or `via-pr`."
         type: string
@@ -44,6 +49,7 @@ jobs:
       DOT_FILE: ${{ inputs.dot-file }}
       DOT_DERIVED_SVG_FILE: ${{ inputs.dot-derived-svg-file }}
       MERMAID_FILE: ${{ inputs.mermaid-file }}
+      MERMAID_DERIVED_SVG_FILE: ${{ inputs.mermaid-derived-svg-file }}
       COMMIT_PATTERN: ${{ inputs.commit-pattern }}
       GIT_USER_NAME: "github-actions[bot]"
       GIT_USER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
@@ -51,7 +57,7 @@ jobs:
       REF_TYPE: ${{ github.ref_type }}
       REF_NAME: ${{ github.ref_name }}
     steps:
-      - name: Validate parameters
+      - name: Validate parameters and Prepare workspace
         run: |
           set -eu
 
@@ -65,9 +71,17 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "${DOT_FILE}${DOT_DERIVED_SVG_FILE}${MERMAID_FILE}" ]]; then
+          if [[ -z "${DOT_FILE}${DOT_DERIVED_SVG_FILE}${MERMAID_FILE}${MERMAID_DERIVED_SVG_FILE}" ]]; then
             echo "::warning title='No file paths are specified'::This workflow will generate nothing."
           fi
+
+          declare -r workspaceDir="${HOME}/.spm-helper-workspace"
+          mkdir -p "$workspaceDir"
+          declare -r scratchPath="${workspaceDir}/.build"
+          mkdir -p "$scratchPath"
+
+          echo "WORKSPACE=$workspaceDir" >>"$GITHUB_ENV"
+          echo "SCRATCH_PATH=$scratchPath" >>"$GITHUB_ENV"
       - name: Install zsh
         run: |
           sudo apt-get update
@@ -77,6 +91,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends graphviz
+      - name: Install Node.js
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+      - name: Install mermaid CLI
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE }}
+        run: npm install -g @mermaid-js/mermaid-cli
       - name: Install Swift
         uses: YOCKOW/Action-setup-swift@v1
         with:
@@ -86,12 +108,11 @@ jobs:
           GH_TOKEN: ${{ secrets.gh-token }}
         run: |
           set -u
-          declare -r spmHelperRepoDir="$HOME/.spm-helper"
+          declare -r spmHelperRepoDir="$WORKSPACE/spm-helper-repo"
           gh repo clone \
             "$SPM_HELPER_REPO_URL" "${spmHelperRepoDir}" \
             -- -b "v0.0.1" --depth 1
           echo "${spmHelperRepoDir}/bin" >>"$GITHUB_PATH"
-          echo "SCRATCH_PATH=${spmHelperRepoDir}/.build" >>"$GITHUB_ENV"
       - name: Check out the repository
         uses: actions/checkout@v6
       - name: Configure git
@@ -100,17 +121,48 @@ jobs:
           git config --local user.name "${GIT_USER_NAME}"
           git config --local user.email "${GIT_USER_EMAIL}"
       - name: Generate DOT file
+        if: ${{ env.DOT_FILE != '' || env.DOT_DERIVED_SVG_FILE != '' }}
+        run: |
+          set -eu
+          declare -r tmpDotFile="$WORKSPACE/tmp.dot"
+          spm-helper dep-pretty-dot \
+            --package-path "$PACKAGE_PATH" \
+            --scratch-path "$SCRATCH_PATH" >"$tmpDotFile"
+          echo "TMP_DOT_FILE=$tmpDotFile" >>"$GITHUB_ENV"
+      - name: Copy DOT file
         if: ${{ env.DOT_FILE != '' }}
         run: |
-          spm-helper dep-pretty-dot --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" >"$DOT_FILE"
+          set -eu
+          cat "$TMP_DOT_FILE" >"$DOT_FILE"
       - name: Generate SVG file from DOT
         if: ${{ env.DOT_DERIVED_SVG_FILE != '' }}
         run: |
-          spm-helper dep-pretty-dot --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" | dot -Tsvg >"$DOT_DERIVED_SVG_FILE"
+          set -eu
+          cat "$TMP_DOT_FILE" | dot -Tsvg >"$DOT_DERIVED_SVG_FILE"
       - name: Generate Mermaid file
+        if: ${{ env.MERMAID_FILE != '' || env.MERMAID_DERIVED_SVG_FILE != '' }}
+        run: |
+          set -eu
+          declare -r tmpMermaidFile="$WORKSPACE/tmp.mmd"
+          spm-helper dep-mermaid \
+            --package-path "$PACKAGE_PATH" \
+            --scratch-path "$SCRATCH_PATH" >"$tmpMermaidFile"
+          echo "TMP_MERMAID_FILE=$tmpMermaidFile" >>"$GITHUB_ENV"
+      - name: Copy Mermaid file
         if: ${{ env.MERMAID_FILE != '' }}
         run: |
-          spm-helper dep-mermaid --package-path "$PACKAGE_PATH" --scratch-path "$SCRATCH_PATH" >"$MERMAID_FILE"
+          set -eu
+          cat "$TMP_MERMAID_FILE" >"$MERMAID_FILE"
+      - name: Generate SVG file from Mermaid
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        run: |
+          set -eu
+          declare -r tmpMermaidSVGFile="${TMP_MERMAID_FILE}.svg"
+          declare -r puppeteerConfigFile="${WORKSPACE}/puppeteerConfig.json"
+          echo '{"args": ["--no-sandbox"]}' >"$puppeteerConfigFile"
+          mmdc --puppeteerConfigFile "$puppeteerConfigFile" \
+            -i "$TMP_MERMAID_FILE" -o "$tmpMermaidSVGFile"
+          cat "$tmpMermaidSVGFile" >"$MERMAID_DERIVED_SVG_FILE"
       - name: Commit Changes
         shell: zsh {0}
         env:
@@ -154,6 +206,7 @@ jobs:
           __commit-file "$DOT_FILE"
           __commit-file "$DOT_DERIVED_SVG_FILE"
           __commit-file "$MERMAID_FILE"
+          __commit-file "$MERMAID_DERIVED_SVG_FILE"
 
           git fetch origin "$REF_NAME"
           if [[ -z "$(git diff --shortstat "origin/${REF_NAME}..HEAD")" ]]; then
