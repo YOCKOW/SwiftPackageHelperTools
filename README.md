@@ -89,6 +89,7 @@ This subcommand prints the resolved dependency graph with Mermaid format.
 
 Sample:  
 
+<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->
 ```mermaid
 ---
 title: HelperTestPackage Dependencies
@@ -145,6 +146,7 @@ flowchart TD
 
 
 ```
+<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->
 
 
 # License

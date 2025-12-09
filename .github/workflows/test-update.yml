@@ -16,6 +16,7 @@ jobs:
       dot-derived-svg-file: "./sample.dot.svg"
       mermaid-file: "./sample.mmd"
       mermaid-derived-svg-file: "./sample.mmd.svg"
+      mermaid-embedded-markdown-file: "./README.md"
       commit-pattern: via-pr
     secrets:
       gh-token: ${{ secrets.GITHUB_TOKEN }}

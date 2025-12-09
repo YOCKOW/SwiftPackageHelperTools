@@ -31,6 +31,15 @@ on:
         type: string
         required: false
         default: ""
+      mermaid-embedded-markdown-file:
+        description: |-
+          The path to the Markdown file which contains embdded Mermaid graph.
+          Markdown will be overwritten with Mermaid graph which should be embedded between
+          `<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->` line and
+          `<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->` line.
+        type: string
+        required: false
+        default: ""
       commit-pattern:
         description: "How to commit the generated files. Valid value is `direct` or `via-pr`."
         type: string
@@ -50,6 +59,7 @@ jobs:
       DOT_DERIVED_SVG_FILE: ${{ inputs.dot-derived-svg-file }}
       MERMAID_FILE: ${{ inputs.mermaid-file }}
       MERMAID_DERIVED_SVG_FILE: ${{ inputs.mermaid-derived-svg-file }}
+      MERMAID_EMBEDDED_MARKDOWN_FILE: ${{ inputs.mermaid-embedded-markdown-file }}
       COMMIT_PATTERN: ${{ inputs.commit-pattern }}
       GIT_USER_NAME: "github-actions[bot]"
       GIT_USER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
@@ -71,7 +81,7 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "${DOT_FILE}${DOT_DERIVED_SVG_FILE}${MERMAID_FILE}${MERMAID_DERIVED_SVG_FILE}" ]]; then
+          if [[ -z "${DOT_FILE}${DOT_DERIVED_SVG_FILE}${MERMAID_FILE}${MERMAID_DERIVED_SVG_FILE}${MERMAID_EMBEDDED_MARKDOWN_FILE}" ]]; then
             echo "::warning title='No file paths are specified'::This workflow will generate nothing."
           fi
 
@@ -82,6 +92,7 @@ jobs:
 
           echo "WORKSPACE=$workspaceDir" >>"$GITHUB_ENV"
           echo "SCRATCH_PATH=$scratchPath" >>"$GITHUB_ENV"
+          echo "JOB_UUID=$(uuidgen)" >>"$GITHUB_ENV"
       - name: Install zsh
         run: |
           sudo apt-get update
@@ -124,7 +135,7 @@ jobs:
         if: ${{ env.DOT_FILE != '' || env.DOT_DERIVED_SVG_FILE != '' }}
         run: |
           set -eu
-          declare -r tmpDotFile="$WORKSPACE/tmp.dot"
+          declare -r tmpDotFile="$WORKSPACE/${JOB_UUID}.dot"
           spm-helper dep-pretty-dot \
             --package-path "$PACKAGE_PATH" \
             --scratch-path "$SCRATCH_PATH" >"$tmpDotFile"
@@ -140,10 +151,15 @@ jobs:
           set -eu
           cat "$TMP_DOT_FILE" | dot -Tsvg >"$DOT_DERIVED_SVG_FILE"
       - name: Generate Mermaid file
-        if: ${{ env.MERMAID_FILE != '' || env.MERMAID_DERIVED_SVG_FILE != '' }}
+        if: >-
+          ${{
+            env.MERMAID_FILE != '' ||
+            env.MERMAID_DERIVED_SVG_FILE != '' ||
+            env.MERMAID_EMBEDDED_MARKDOWN_FILE != ''
+          }}
         run: |
           set -eu
-          declare -r tmpMermaidFile="$WORKSPACE/tmp.mmd"
+          declare -r tmpMermaidFile="$WORKSPACE/${JOB_UUID}.mmd"
           spm-helper dep-mermaid \
             --package-path "$PACKAGE_PATH" \
             --scratch-path "$SCRATCH_PATH" >"$tmpMermaidFile"
@@ -163,6 +179,60 @@ jobs:
           mmdc --puppeteerConfigFile "$puppeteerConfigFile" \
             -i "$TMP_MERMAID_FILE" -o "$tmpMermaidSVGFile"
           cat "$tmpMermaidSVGFile" >"$MERMAID_DERIVED_SVG_FILE"
+      - name: Embed Mermaid graph to Markdown file
+        if: ${{ env.MERMAID_EMBEDDED_MARKDOWN_FILE != '' }}
+        shell: zsh {0}
+        run: |
+          set -eu
+
+          if [[ ! -f "$MERMAID_EMBEDDED_MARKDOWN_FILE" ]]; then
+            echo "<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->" >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+            echo "<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->" >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+          fi
+
+          declare -r tmpMarkdownFile="${WORKSPACE}/${JOB_UUID}.md"
+          touch "$tmpMarkdownFile"
+
+          function __isMermaidStartLine() {
+            local -r mdLine="$1"
+            if echo "$mdLine" | grep -i -E -e '^\s*<!--\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s+(START)?\s*-->\s*$'; then
+              return 0
+            fi
+            return 1
+          }
+
+          function __isMermaidEndLine() {
+            local -r mdLine="$1"
+            if (
+              echo "$mdLine" | grep -i -E -e '^\s*<!--\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s+END\s*-->\s*$' >/dev/null
+            ) || (
+              echo "$mdLine" | grep -i -E -e '^\s*<!--\s*/\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s*-->\s*$' >/dev/null
+            ); then
+              return 0
+            fi
+            return 1
+          }
+
+          declare readLine
+          declare shouldSkip="false"
+          while IFS= read -r readLine; do
+            if [[ "$shouldSkip" == 'false' ]]; then
+              echo "$readLine" >>"$tmpMarkdownFile"
+              if __isMermaidStartLine "$readLine"; then
+                shouldSkip='true'
+                echo '```mermaid' >>"$tmpMarkdownFile"
+                cat "$TMP_MERMAID_FILE" >>"$tmpMarkdownFile"
+                echo $'\n```' >>"$tmpMarkdownFile"
+              fi
+            else
+              if __isMermaidEndLine "$readLine"; then
+                shouldSkip='false'
+                echo "$readLine" >>"$tmpMarkdownFile"
+              fi
+            fi
+          done < "$MERMAID_EMBEDDED_MARKDOWN_FILE"
+
+          cat "$tmpMarkdownFile" >"$MERMAID_EMBEDDED_MARKDOWN_FILE"
       - name: Commit Changes
         shell: zsh {0}
         env:
@@ -171,11 +241,10 @@ jobs:
           set -eu
 
           declare -r dateNow="$(date '+%Y-%m-%d %H:%M:%S%z')"
-          declare -r uuidValue="$(uuidgen)"
           declare -r repoLink_md="[SwiftPackageHelperTools](${SPM_HELPER_REPO_URL})"
           declare -r commitMessageFooter=$({
             echo "This commit is done by the workflow in ${repoLink_md}."
-            echo "- UUID: $uuidValue"
+            echo "- UUID: $JOB_UUID"
             echo "- Date: $dateNow"
           })
           declare -a updatedFiles=()
@@ -198,7 +267,7 @@ jobs:
           }
 
           if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
-            branchName="spm-helper-$uuidValue"
+            branchName="spm-helper-$JOB_UUID"
             git fetch origin --unshallow
             git checkout -b "$branchName"
           fi
@@ -207,6 +276,7 @@ jobs:
           __commit-file "$DOT_DERIVED_SVG_FILE"
           __commit-file "$MERMAID_FILE"
           __commit-file "$MERMAID_DERIVED_SVG_FILE"
+          __commit-file "$MERMAID_EMBEDDED_MARKDOWN_FILE"
 
           git fetch origin "$REF_NAME"
           if [[ -z "$(git diff --shortstat "origin/${REF_NAME}..HEAD")" ]]; then
@@ -219,7 +289,7 @@ jobs:
           if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
             declare -r prBody=$({
               echo "This PR is opend by the workflow in ${repoLink_md}."
-              echo "- UUID: $uuidValue"
+              echo "- UUID: $JOB_UUID"
               echo "- Date: $dateNow"
               echo ""
               echo "**Updated files**"
