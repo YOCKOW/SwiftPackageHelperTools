@@ -36,28 +36,17 @@ Sample:
 ```dot
 digraph helpertestpackageDependenciesGraph {
   "helpertestpackage" [ label="HelperTestPackage", shape=polygon ]
-  "swiftbootstring" [ label="Bootstring
-@1.2.0", shape=oval, URL="https://github.com/YOCKOW/SwiftBootstring.git" ]
-  "swiftcgiresponder" [ label="CGIResponder
-@0.12.0", shape=oval, URL="https://github.com/YOCKOW/SwiftCGIResponder.git" ]
-  "swiftnetworkgear" [ label="NetworkGear
-@0.19.5", shape=oval, URL="https://github.com/YOCKOW/SwiftNetworkGear.git" ]
-  "swiftpublicsuffix" [ label="PublicSuffix
-@2.4.0", shape=oval, URL="https://github.com/YOCKOW/SwiftPublicSuffix.git" ]
-  "swiftranges" [ label="Ranges
-@3.2.2", shape=oval, URL="https://github.com/YOCKOW/SwiftRanges.git" ]
-  "swiftstringcomposition" [ label="StringComposition
-@2.2.0", shape=oval, URL="https://github.com/YOCKOW/SwiftStringComposition.git" ]
-  "swifttemporaryfile" [ label="TemporaryFile
-@4.2.1", shape=oval, URL="https://github.com/YOCKOW/SwiftTemporaryFile.git" ]
-  "swifttimespecification" [ label="TimeSpecification
-@3.4.0", shape=oval, URL="https://github.com/YOCKOW/SwiftTimeSpecification.git" ]
-  "swiftunicodesupplement" [ label="UnicodeSupplement
-@1.7.0", shape=oval, URL="https://github.com/YOCKOW/SwiftUnicodeSupplement.git" ]
-  "swiftxhtml" [ label="XHTML
-@2.8.0", shape=oval, URL="https://github.com/YOCKOW/SwiftXHTML.git" ]
-  "yswiftextensions" [ label="yExtensions
-@1.12.1", shape=oval, URL="https://github.com/YOCKOW/ySwiftExtensions.git" ]
+  "swiftbootstring" [ label="Bootstring\n@1.2.0", shape=oval, URL="https://github.com/YOCKOW/SwiftBootstring.git" ]
+  "swiftcgiresponder" [ label="CGIResponder\n@0.12.0", shape=oval, URL="https://github.com/YOCKOW/SwiftCGIResponder.git" ]
+  "swiftnetworkgear" [ label="NetworkGear\n@0.19.5", shape=oval, URL="https://github.com/YOCKOW/SwiftNetworkGear.git" ]
+  "swiftpublicsuffix" [ label="PublicSuffix\n@2.4.0", shape=oval, URL="https://github.com/YOCKOW/SwiftPublicSuffix.git" ]
+  "swiftranges" [ label="Ranges\n@3.2.2", shape=oval, URL="https://github.com/YOCKOW/SwiftRanges.git" ]
+  "swiftstringcomposition" [ label="StringComposition\n@2.2.0", shape=oval, URL="https://github.com/YOCKOW/SwiftStringComposition.git" ]
+  "swifttemporaryfile" [ label="TemporaryFile\n@4.2.1", shape=oval, URL="https://github.com/YOCKOW/SwiftTemporaryFile.git" ]
+  "swifttimespecification" [ label="TimeSpecification\n@3.4.0", shape=oval, URL="https://github.com/YOCKOW/SwiftTimeSpecification.git" ]
+  "swiftunicodesupplement" [ label="UnicodeSupplement\n@1.7.0", shape=oval, URL="https://github.com/YOCKOW/SwiftUnicodeSupplement.git" ]
+  "swiftxhtml" [ label="XHTML\n@2.8.0", shape=oval, URL="https://github.com/YOCKOW/SwiftXHTML.git" ]
+  "yswiftextensions" [ label="yExtensions\n@1.12.1", shape=oval, URL="https://github.com/YOCKOW/ySwiftExtensions.git" ]
 
   "helpertestpackage" -> "swiftcgiresponder"
   "swiftcgiresponder" -> "swiftnetworkgear"
