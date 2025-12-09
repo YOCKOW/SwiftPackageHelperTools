@@ -236,5 +236,14 @@ jobs:
               --title "Update the dependencies files. (${dateNow})" \
               --body "${prBody}"
             )
-            gh pr merge --merge --auto --delete-branch "$prURL"
+            
+            # Sometimes merging fails...
+            sleep 3
+            gh pr merge --merge --delete-branch "$prURL" || (
+              sleep 3 &&
+              gh pr merge --merge --delete-branch "$prURL"
+            ) || (
+              sleep 3 &&
+              gh pr merge --merge --auto --delete-branch "$prURL"
+            )
           fi
