@@ -217,7 +217,7 @@ jobs:
           declare shouldSkip="false"
           while IFS= read -r readLine; do
             if [[ "$shouldSkip" == 'false' ]]; then
-              echo "$readLine" >>"$tmpMarkdownFile"
+              printf '%s\n' "$readLine" >>"$tmpMarkdownFile"
               if __isMermaidStartLine "$readLine"; then
                 shouldSkip='true'
                 echo '```mermaid' >>"$tmpMarkdownFile"
@@ -227,7 +227,7 @@ jobs:
             else
               if __isMermaidEndLine "$readLine"; then
                 shouldSkip='false'
-                echo "$readLine" >>"$tmpMarkdownFile"
+                printf '%s\n' "$readLine" >>"$tmpMarkdownFile"
               fi
             fi
           done < "$MERMAID_EMBEDDED_MARKDOWN_FILE"
