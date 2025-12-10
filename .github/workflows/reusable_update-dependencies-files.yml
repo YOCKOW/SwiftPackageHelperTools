@@ -197,8 +197,8 @@ jobs:
           set -eu
 
           if [[ ! -f "$MERMAID_EMBEDDED_MARKDOWN_FILE" ]]; then
-            echo "<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->" >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
-            echo "<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->" >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+            echo '<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->' >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+            echo '<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->' >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
           fi
 
           declare -r tmpMarkdownFile="${WORKSPACE}/${JOB_UUID}.md"
@@ -206,7 +206,7 @@ jobs:
 
           function __isMermaidStartLine() {
             local -r mdLine="$1"
-            if echo "$mdLine" | grep -i -E -e '^\s*<!--\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s+(START)?\s*-->\s*$'; then
+            if echo "$mdLine" | grep -i -E -e '^\s*<!--\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s+(START)?\s*-->\s*$' >/dev/null; then
               return 0
             fi
             return 1
