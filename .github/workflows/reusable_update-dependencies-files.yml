@@ -186,8 +186,9 @@ jobs:
 
           # Prettify SVG
           xmllint --format "$tmpMermaidSVGFile" --pretty 2 | \
-            sed  -E -e ':a' -e 'N' -e '$!ba' -e 's|(\n[[:space:]]+)(/?)><|\2>\1<|g' | \
-            sed  -E -e ':a' -e 'N' -e '$!ba' -e 's|\n[[:space:]]*(/?)>|\1>|g' | \
+            sed -E -e ':a' -e 'N' -e '$!ba' -e 's|(\n[[:space:]]+)(/?)><|\2>\1<|g' | \
+            sed -E -e ':a' -e 'N' -e '$!ba' -e 's|\n[[:space:]]*(/?)>|\1>|g' | \
+            sed -E -e ':a' -e 'N' -e '$!ba' -e 's|(<[0-9A-Za-z]+)\n[[:space:]]+([-0-9A-Za-z]+="[^"]*"/?>)|\1 \2|g' | \
             sed -E 's|'"$XMLLINT_INDENT"'(</[0-9A-Za-z]+>)|\1|g' \
             >"$MERMAID_DERIVED_SVG_FILE"
       - name: Embed Mermaid graph to Markdown file
