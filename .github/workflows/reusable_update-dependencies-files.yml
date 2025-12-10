@@ -107,9 +107,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24.x"
-      - name: Install mermaid CLI
-        if: ${{ env.MERMAID_DERIVED_SVG_FILE }}
-        run: npm install -g @mermaid-js/mermaid-cli
+      - name: Install mermaid CLI and xmllint(libxml2-utils)
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        run: |
+          npm install -g @mermaid-js/mermaid-cli
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxml2-utils
       - name: Install Swift
         uses: YOCKOW/Action-setup-swift@v1
         with:
@@ -171,6 +174,8 @@ jobs:
           cat "$TMP_MERMAID_FILE" >"$MERMAID_FILE"
       - name: Generate SVG file from Mermaid
         if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        env:
+          XMLLINT_INDENT: "  "
         run: |
           set -eu
           declare -r tmpMermaidSVGFile="${TMP_MERMAID_FILE}.svg"
@@ -178,7 +183,13 @@ jobs:
           echo '{"args": ["--no-sandbox"]}' >"$puppeteerConfigFile"
           mmdc --puppeteerConfigFile "$puppeteerConfigFile" \
             -i "$TMP_MERMAID_FILE" -o "$tmpMermaidSVGFile"
-          cat "$tmpMermaidSVGFile" >"$MERMAID_DERIVED_SVG_FILE"
+
+          # Prettify SVG
+          xmllint --format "$tmpMermaidSVGFile" --pretty 2 | \
+            sed  -E -e ':a' -e 'N' -e '$!ba' -e 's|(\n[[:space:]]+)(/?)><|\2>\1<|g' | \
+            sed  -E -e ':a' -e 'N' -e '$!ba' -e 's|\n[[:space:]]*(/?)>|\1>|g' | \
+            sed -E 's|'"$XMLLINT_INDENT"'(</[0-9A-Za-z]+>)|\1|g' \
+            >"$MERMAID_DERIVED_SVG_FILE"
       - name: Embed Mermaid graph to Markdown file
         if: ${{ env.MERMAID_EMBEDDED_MARKDOWN_FILE != '' }}
         shell: zsh {0}
