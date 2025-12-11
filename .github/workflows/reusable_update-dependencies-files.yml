@@ -1,0 +1,331 @@
+name: Update Files Showing Package Dependencies
+on:
+  workflow_call:
+    inputs:
+      swift-version:
+        description: "The Version of Swift to be used."
+        type: string
+        required: true
+      package-path:
+        description: "The path to the directory of the Swift package."
+        type: string
+        required: false
+        default: "."
+      dot-file:
+        description: "The path to the file with DOT format to be saved."
+        type: string
+        required: false
+        default: ""
+      dot-derived-svg-file:
+        description: "The path to the file with SVG format that is derived from DOT format."
+        type: string
+        required: false
+        default: ""
+      mermaid-file:
+        description: "The path to the file with Mermaid format to be saved."
+        type: string
+        required: false
+        default: ""
+      mermaid-derived-svg-file:
+        description: "The path to the file with SVG format that is derived from Mermaid format."
+        type: string
+        required: false
+        default: ""
+      mermaid-embedded-markdown-file:
+        description: |-
+          The path to the Markdown file which contains embdded Mermaid graph.
+          Markdown will be overwritten with Mermaid graph which should be embedded between
+          `<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->` line and
+          `<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->` line.
+        type: string
+        required: false
+        default: ""
+      commit-pattern:
+        description: "How to commit the generated files. Valid value is `direct` or `via-pr`."
+        type: string
+        required: false
+        default: "direct"
+    secrets:
+      gh-token:
+        description: "The value to be set to GH_TOKEN."
+        required: true
+jobs:
+  update-dependencies-files:
+    runs-on: ubuntu-latest
+    env:
+      SPM_HELPER_REPO_URL: "https://GitHub.com/YOCKOW/SwiftPackageHelperTools.git"
+      PACKAGE_PATH: ${{ inputs.package-path }}
+      DOT_FILE: ${{ inputs.dot-file }}
+      DOT_DERIVED_SVG_FILE: ${{ inputs.dot-derived-svg-file }}
+      MERMAID_FILE: ${{ inputs.mermaid-file }}
+      MERMAID_DERIVED_SVG_FILE: ${{ inputs.mermaid-derived-svg-file }}
+      MERMAID_EMBEDDED_MARKDOWN_FILE: ${{ inputs.mermaid-embedded-markdown-file }}
+      COMMIT_PATTERN: ${{ inputs.commit-pattern }}
+      GIT_USER_NAME: "github-actions[bot]"
+      GIT_USER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+      EVENT_NAME: ${{ github.event_name }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Validate parameters and Prepare workspace
+        run: |
+          set -eu
+
+          if [[ "$EVENT_NAME" != 'push' ]] && [[ "$REF_TYPE" != 'branch' ]]; then
+            echo "::error::This Workflow is supposed to run when a branch is pushed."
+            exit 1
+          fi
+
+          if [[ "$COMMIT_PATTERN" != 'direct' ]] && [[ "$COMMIT_PATTERN" != 'via-pr' ]]; then
+            echo "::error::Invalid value \"${COMMIT_PATTERN}\" for \`commit-pattern\`."
+            exit 1
+          fi
+
+          if [[ -z "${DOT_FILE}${DOT_DERIVED_SVG_FILE}${MERMAID_FILE}${MERMAID_DERIVED_SVG_FILE}${MERMAID_EMBEDDED_MARKDOWN_FILE}" ]]; then
+            echo "::warning title='No file paths are specified'::This workflow will generate nothing."
+          fi
+
+          declare -r workspaceDir="${HOME}/.spm-helper-workspace"
+          mkdir -p "$workspaceDir"
+          declare -r scratchPath="${workspaceDir}/.build"
+          mkdir -p "$scratchPath"
+
+          echo "WORKSPACE=$workspaceDir" >>"$GITHUB_ENV"
+          echo "SCRATCH_PATH=$scratchPath" >>"$GITHUB_ENV"
+          echo "JOB_UUID=$(uuidgen)" >>"$GITHUB_ENV"
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zsh
+      - name: Install Graphviz
+        if: ${{ env.DOT_DERIVED_SVG_FILE != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends graphviz
+      - name: Install Node.js
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+      - name: Install mermaid CLI and xmllint(libxml2-utils)
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        run: |
+          npm install -g @mermaid-js/mermaid-cli
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxml2-utils
+      - name: Install Swift
+        uses: YOCKOW/Action-setup-swift@v1
+        with:
+          swift-version: ${{ inputs.swift-version }}
+      - name: Install spm-helper
+        env:
+          GH_TOKEN: ${{ secrets.gh-token }}
+        run: |
+          set -u
+          declare -r spmHelperRepoDir="$WORKSPACE/spm-helper-repo"
+          gh repo clone \
+            "$SPM_HELPER_REPO_URL" "${spmHelperRepoDir}" \
+            -- -b "v0.0.1" --depth 1
+          echo "${spmHelperRepoDir}/bin" >>"$GITHUB_PATH"
+      - name: Check out the repository
+        uses: actions/checkout@v6
+      - name: Configure git
+        run: |
+          set -x
+          git config --local user.name "${GIT_USER_NAME}"
+          git config --local user.email "${GIT_USER_EMAIL}"
+      - name: Generate DOT file
+        if: ${{ env.DOT_FILE != '' || env.DOT_DERIVED_SVG_FILE != '' }}
+        run: |
+          set -eu
+          declare -r tmpDotFile="$WORKSPACE/${JOB_UUID}.dot"
+          spm-helper dep-pretty-dot \
+            --package-path "$PACKAGE_PATH" \
+            --scratch-path "$SCRATCH_PATH" >"$tmpDotFile"
+          echo "TMP_DOT_FILE=$tmpDotFile" >>"$GITHUB_ENV"
+      - name: Copy DOT file
+        if: ${{ env.DOT_FILE != '' }}
+        run: |
+          set -eu
+          cat "$TMP_DOT_FILE" >"$DOT_FILE"
+      - name: Generate SVG file from DOT
+        if: ${{ env.DOT_DERIVED_SVG_FILE != '' }}
+        run: |
+          set -eu
+          cat "$TMP_DOT_FILE" | dot -Tsvg >"$DOT_DERIVED_SVG_FILE"
+      - name: Generate Mermaid file
+        if: >-
+          ${{
+            env.MERMAID_FILE != '' ||
+            env.MERMAID_DERIVED_SVG_FILE != '' ||
+            env.MERMAID_EMBEDDED_MARKDOWN_FILE != ''
+          }}
+        run: |
+          set -eu
+          declare -r tmpMermaidFile="$WORKSPACE/${JOB_UUID}.mmd"
+          spm-helper dep-mermaid \
+            --package-path "$PACKAGE_PATH" \
+            --scratch-path "$SCRATCH_PATH" >"$tmpMermaidFile"
+          echo "TMP_MERMAID_FILE=$tmpMermaidFile" >>"$GITHUB_ENV"
+      - name: Copy Mermaid file
+        if: ${{ env.MERMAID_FILE != '' }}
+        run: |
+          set -eu
+          cat "$TMP_MERMAID_FILE" >"$MERMAID_FILE"
+      - name: Generate SVG file from Mermaid
+        if: ${{ env.MERMAID_DERIVED_SVG_FILE != '' }}
+        env:
+          XMLLINT_INDENT: "  "
+        run: |
+          set -eu
+          declare -r tmpMermaidSVGFile="${TMP_MERMAID_FILE}.svg"
+          declare -r puppeteerConfigFile="${WORKSPACE}/puppeteerConfig.json"
+          echo '{"args": ["--no-sandbox"]}' >"$puppeteerConfigFile"
+          mmdc --puppeteerConfigFile "$puppeteerConfigFile" \
+            -i "$TMP_MERMAID_FILE" -o "$tmpMermaidSVGFile"
+
+          # Prettify SVG
+          xmllint --format "$tmpMermaidSVGFile" --pretty 2 | \
+            sed -E -e ':a' -e 'N' -e '$!ba' -e 's|(\n[[:space:]]+)(/?)><|\2>\1<|g' | \
+            sed -E -e ':a' -e 'N' -e '$!ba' -e 's|\n[[:space:]]*(/?)>|\1>|g' | \
+            sed -E -e ':a' -e 'N' -e '$!ba' -e 's|(<[0-9A-Za-z]+)\n[[:space:]]+([-0-9A-Za-z]+="[^"]*"/?>)|\1 \2|g' | \
+            sed -E 's|'"$XMLLINT_INDENT"'(</[0-9A-Za-z]+>)|\1|g' \
+            >"$MERMAID_DERIVED_SVG_FILE"
+      - name: Embed Mermaid graph to Markdown file
+        if: ${{ env.MERMAID_EMBEDDED_MARKDOWN_FILE != '' }}
+        shell: zsh {0}
+        run: |
+          set -eu
+
+          if [[ ! -f "$MERMAID_EMBEDDED_MARKDOWN_FILE" ]]; then
+            echo '<!-- SWIFT PACKAGE DEPENDENCIES MERMAID START -->' >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+            echo '<!-- SWIFT PACKAGE DEPENDENCIES MERMAID END -->' >>"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+          fi
+
+          declare -r tmpMarkdownFile="${WORKSPACE}/${JOB_UUID}.md"
+          touch "$tmpMarkdownFile"
+
+          function __isMermaidStartLine() {
+            local -r mdLine="$1"
+            if echo "$mdLine" | grep -i -E -e '^\s*<!--\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s+(START)?\s*-->\s*$' >/dev/null; then
+              return 0
+            fi
+            return 1
+          }
+
+          function __isMermaidEndLine() {
+            local -r mdLine="$1"
+            if (
+              echo "$mdLine" | grep -i -E -e '^\s*<!--\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s+END\s*-->\s*$' >/dev/null
+            ) || (
+              echo "$mdLine" | grep -i -E -e '^\s*<!--\s*/\s*SWIFT\s+PACKAGE\s+(MANAGER\s+)?(HELPER\s+)?DEPENDENCIES\s+MERMAID\s*-->\s*$' >/dev/null
+            ); then
+              return 0
+            fi
+            return 1
+          }
+
+          declare readLine
+          declare shouldSkip="false"
+          while IFS= read -r readLine; do
+            if [[ "$shouldSkip" == 'false' ]]; then
+              printf '%s\n' "$readLine" >>"$tmpMarkdownFile"
+              if __isMermaidStartLine "$readLine"; then
+                shouldSkip='true'
+                echo '```mermaid' >>"$tmpMarkdownFile"
+                cat "$TMP_MERMAID_FILE" >>"$tmpMarkdownFile"
+                echo $'\n```' >>"$tmpMarkdownFile"
+              fi
+            else
+              if __isMermaidEndLine "$readLine"; then
+                shouldSkip='false'
+                printf '%s\n' "$readLine" >>"$tmpMarkdownFile"
+              fi
+            fi
+          done < "$MERMAID_EMBEDDED_MARKDOWN_FILE"
+
+          cat "$tmpMarkdownFile" >"$MERMAID_EMBEDDED_MARKDOWN_FILE"
+      - name: Commit Changes
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ secrets.gh-token }}
+        run: |
+          set -eu
+
+          declare -r dateNow="$(date '+%Y-%m-%d %H:%M:%S%z')"
+          declare -r repoLink_md="[SwiftPackageHelperTools](${SPM_HELPER_REPO_URL})"
+          declare -r commitMessageFooter=$({
+            echo "This commit is done by the workflow in ${repoLink_md}."
+            echo "- UUID: $JOB_UUID"
+            echo "- Date: $dateNow"
+          })
+          declare -a updatedFiles=()
+          declare branchName="$REF_NAME"
+
+          function __commit-file() {
+            local -r filename="$1"
+            if [[ -z "$filename" ]]; then
+              return 0
+            fi
+
+            git add --intent-to-add "$filename"
+            if [[ -n "$(git diff --shortstat HEAD -- "$filename")" ]]; then
+              git add "$filename"
+              git commit -m "Update \"${filename}\"."$'\n\n'"${commitMessageFooter}"
+              updatedFiles+=("$filename")
+            else
+              echo "::notice::\"${filename}\" is up-to-date."
+            fi
+          }
+
+          if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
+            branchName="spm-helper-$JOB_UUID"
+            git fetch origin --unshallow
+            git checkout -b "$branchName"
+          fi
+
+          __commit-file "$DOT_FILE"
+          __commit-file "$DOT_DERIVED_SVG_FILE"
+          __commit-file "$MERMAID_FILE"
+          __commit-file "$MERMAID_DERIVED_SVG_FILE"
+          __commit-file "$MERMAID_EMBEDDED_MARKDOWN_FILE"
+
+          git fetch origin "$REF_NAME"
+          if [[ -z "$(git diff --shortstat "origin/${REF_NAME}..HEAD")" ]]; then
+            echo "::notice::No files to commit."
+            exit 0
+          fi
+
+          git push origin --set-upstream "${branchName}:${branchName}"
+
+          if [[ "$COMMIT_PATTERN" == 'via-pr' ]]; then
+            declare -r prBody=$({
+              echo "This PR is opend by the workflow in ${repoLink_md}."
+              echo "- UUID: $JOB_UUID"
+              echo "- Date: $dateNow"
+              echo ""
+              echo "**Updated files**"
+              local updatedFile
+              for updatedFile in $updatedFiles; do
+                echo "- $updatedFile"
+              done
+            })
+
+            declare prURL
+            prURL=$(
+              gh pr create \
+              --base "${REF_NAME}" --head "${branchName}" \
+              --title "Update the dependencies files. (${dateNow})" \
+              --body "${prBody}"
+            )
+            
+            # Sometimes merging fails...
+            sleep 3
+            gh pr merge --merge --delete-branch "$prURL" || (
+              sleep 3 &&
+              gh pr merge --merge --delete-branch "$prURL"
+            ) || (
+              sleep 3 &&
+              gh pr merge --merge --auto --delete-branch "$prURL"
+            )
+          fi
