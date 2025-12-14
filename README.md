@@ -107,6 +107,34 @@ flowchart TD
 
 - SVG: [sample.mmd.svg](./sample.mmd.svg) ![sample.mmd.svg](./sample.mmd.svg)
 
+## GitHub Actions' workflow
+
+This repository contains [reusable workflow](./.github/workflows/reusable_update-dependencies-files.yml).
+You can use the workflow in your repository like this:
+
+```yaml
+name: Update dependencies files.
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - '**/Package.swift'
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  update-dependencies-files:
+    uses: YOCKOW/SwiftPackageHelperTools/.github/workflows/reusable_update-dependencies-files.yml@main
+    with:
+      swift-version: "6.2.3"
+      dot-derived-svg-file: "./dependencies.dot.svg"
+    secrets:
+      gh-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Other available parameters(inputs) can be seen in the YAML file: [reusable_update-dependencies-files.yml](.github/workflows/reusable_update-dependencies-files.yml).
+
 # License
 
 MIT License.  
