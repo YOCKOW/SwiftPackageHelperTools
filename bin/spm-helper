@@ -225,24 +225,24 @@ let rootPackage = try decoder.decode(PackageInfo.self, from: Data(json.utf8))
 var allPackages: Array<PackageInfo> = []
 var allLinks: Array<DependencyLink> = []
 
-func appendPackage(_ package: PackageInfo) {
-  if allPackages.allSatisfy({ $0.identity != package.identity }) {
-    verbosePrint("Package: \(package.identity)(\(package.name))")
-    allPackages.append(package)
-  }
-}
-
-func appendLink(from: PackageInfo, to: PackageInfo) {
-  if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
-    verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
-    allLinks.append(DependencyLink(from: from, to: to))
-  }
-}
-
 func walkDependencies(of package: PackageInfo) {
-  appendPackage(package)
+  func __appendPackage(_ package: PackageInfo) {
+    if allPackages.allSatisfy({ $0.identity != package.identity }) {
+      verbosePrint("Package: \(package.identity)(\(package.name))")
+      allPackages.append(package)
+    }
+  }
+
+  func __appendLink(from: PackageInfo, to: PackageInfo) {
+    if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
+      verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
+      allLinks.append(DependencyLink(from: from, to: to))
+    }
+  }
+
+  __appendPackage(package)
   for dependency in package.dependencies {
-    appendLink(from: package, to: dependency)
+    __appendLink(from: package, to: dependency)
     walkDependencies(of: dependency)
   }
 }
