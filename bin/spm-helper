@@ -133,67 +133,36 @@ function viewHelp() {
   viewCommonOptions
 }
 
-
-# Subcommands
-################################################################################
-
-function dep-json() {
+function __handle-json() {
   local -A localParsedArguments=()
-  zparseopts -D -E -M -A localParsedArguments -- -flattened
+  zparseopts -D -E -M -A localParsedArguments -- -action:
 
-  local flattened="false"
-  if [[ -n "${localParsedArguments[(i)--flattened]}" ]]; then
-    flattened="true"
+  local actionType="";
+  if [[ -n "${localParsedArguments[(i)--action]}" ]]; then
+    actionType="${localParsedArguments[--action]#=}"
   fi
 
-  local -a swiftPackageShowDependenciesArguments=(
-    --package-path "${commonParsedArguments[package-path]}"
-    --scratch-path "${commonParsedArguments[scratch-path]}"
-    show-dependencies
-    --format json
-  )
-  if isVerbose; then
-    swiftPackageShowDependenciesArguments=(
-      --verbose $swiftPackageShowDependenciesArguments
-    )
-  fi
-
-  if isTrue "$flattened"; then
-    __convert-json --format FlattenedJSON
+  local actionMessage=""
+  if [[ "$actionType" = "print-dot" ]]; then
+    actionMessage="Converting JSON to DOT format"
+  elif [[ "$actionType" = "print-flattened-json" ]]; then
+    actionMessage="Converting nested JSON to flattend JSON"
+  elif [[ "$actionType" = "print-mermaid" ]]; then
+    actionMessage="Converting JSON to Mermaid format"
   else
-    swift package $swiftPackageShowDependenciesArguments
+    assertionFailed "Unexpected action: $actionType" ${(%):-%I}
   fi
-}
-
-function __convert-json() {
-  local -A localParsedArguments=()
-  zparseopts -D -E -M -A localParsedArguments -- f: -format:=f
-
-  local outputFormat="";
-  if [[ -n "${localParsedArguments[(i)-f]}" ]]; then
-    outputFormat="${localParsedArguments[-f]#=}"
-  fi
-
-  local outputFormatName="$outputFormat"
-  if [[ "$outputFormat" = "DOT" ]]; then
-    outputFormatName="DOT format"
-  elif [[ "$outputFormat" = "FlattenedJSON" ]]; then
-    outputFormatName="Flattened JSON"
-  elif [[ "$outputFormat" = "Mermaid" ]]; then
-    outputFormatName="Mermaid format"
-  else
-    assertionFailed "Unexpected format: $outputFormat" ${(%):-%I}
-  fi
+  [[ -n "$actionMessage" ]] || assertionFailed 'Empty actionMessage?!' ${(%):-%I}
 
   local -r tmpFilePath=$(mktemp)
   dep-json >"$tmpFilePath"
 
-  verbosePrint "Converting JSON to ${outputFormatName}..."
+  verbosePrint "${actionMessage}..."
   env \
     VERBOSE_MODE="${commonParsedArguments[verbose]}" \
     JSON_PATH="$tmpFilePath" \
-    OUTPUT_FORMAT="$outputFormat" \
-    swift - <<'____JSON_CONVERTER_SWIFT_CODE____'
+    ACTION_TYPE="$actionType" \
+    swift - <<'____JSON_HANDLER_SWIFT_CODE____'
 
 import Foundation
 
@@ -209,22 +178,22 @@ func verbosePrint(_ message: String) {
   )
 }
 
-enum OutputFormat {
-  case dot
-  case flattenedJSON
-  case mermaid
+enum ActionType {
+  case printDOT
+  case printFlattenedJSON
+  case printMermaid
 
   init?(rawValue: String) {
-    switch rawValue.lowercased() {
-    case "dot": self = .dot
-    case "flattenedjson": self = .flattenedJSON
-    case "mermaid": self = .mermaid
+    switch rawValue {
+    case "print-dot": self = .printDOT
+    case "print-flattened-json": self = .printFlattenedJSON
+    case "print-mermaid": self = .printMermaid
     default: return nil
     }
   }
 }
-guard let outputFormat = OutputFormat(rawValue: env["OUTPUT_FORMAT"]!) else {
-  fatalError("Unexpected format?!")
+guard let actionType = ActionType(rawValue: env["ACTION_TYPE"]!) else {
+  fatalError("Unexpected action type?!")
 }
 
 struct PackageInfo: Codable {
@@ -376,13 +345,44 @@ func printMermaid() {
   print("")
 }
 
-switch outputFormat {
-case .dot: printDOT()
-case .flattenedJSON: try printFlattenedJSON()
-case .mermaid: printMermaid()
+switch actionType {
+case .printDOT: printDOT()
+case .printFlattenedJSON: try printFlattenedJSON()
+case .printMermaid: printMermaid()
 }
 
-____JSON_CONVERTER_SWIFT_CODE____
+____JSON_HANDLER_SWIFT_CODE____
+}
+
+# Subcommands
+################################################################################
+
+function dep-json() {
+  local -A localParsedArguments=()
+  zparseopts -D -E -M -A localParsedArguments -- -flattened
+
+  local flattened="false"
+  if [[ -n "${localParsedArguments[(i)--flattened]}" ]]; then
+    flattened="true"
+  fi
+
+  local -a swiftPackageShowDependenciesArguments=(
+    --package-path "${commonParsedArguments[package-path]}"
+    --scratch-path "${commonParsedArguments[scratch-path]}"
+    show-dependencies
+    --format json
+  )
+  if isVerbose; then
+    swiftPackageShowDependenciesArguments=(
+      --verbose $swiftPackageShowDependenciesArguments
+    )
+  fi
+
+  if isTrue "$flattened"; then
+    __handle-json --action print-flattened-json
+  else
+    swift package $swiftPackageShowDependenciesArguments
+  fi
 }
 
 function dep-pretty-dot() {
@@ -394,7 +394,7 @@ function dep-pretty-dot() {
     return 0
   fi
 
-  __convert-json --format DOT
+  __handle-json --action print-dot
 }
 
 function dep-mermaid() {
@@ -406,7 +406,7 @@ function dep-mermaid() {
     return 0
   fi
 
-  __convert-json --format Mermaid
+  __handle-json --action print-mermaid
 }
 
 
