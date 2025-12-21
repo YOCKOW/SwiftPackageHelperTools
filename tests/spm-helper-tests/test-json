@@ -13,3 +13,7 @@ declare -r json="$(spm-helper dep-json --package-path "$HT_PACKAGE_DIR")"
 
 SSTAssertStringMatch "$json" '"identity":[[:space:]]+"swiftranges",' -l ${(%):-%I}
 SSTAssertStringMatch "$json" '"name":[[:space:]]+"Ranges",' -l ${(%):-%I}
+
+declare -r flattenedJSON="$(spm-helper dep-json --flattened --package-path "$HT_PACKAGE_DIR")"
+SSTAssertStringEqual "${flattenedJSON[1]}" '['
+SSTAssertStringEqual "${flattenedJSON[${#flattenedJSON}]}" ']'
