@@ -138,6 +138,14 @@ function viewHelp() {
 ################################################################################
 
 function dep-json() {
+  local -A localParsedArguments=()
+  zparseopts -D -E -M -A localParsedArguments -- -flattened
+
+  local flattened="false"
+  if [[ -n "${localParsedArguments[(i)--flattened]}" ]]; then
+    flattened="true"
+  fi
+
   local -a swiftPackageShowDependenciesArguments=(
     --package-path "${commonParsedArguments[package-path]}"
     --scratch-path "${commonParsedArguments[scratch-path]}"
@@ -149,7 +157,12 @@ function dep-json() {
       --verbose $swiftPackageShowDependenciesArguments
     )
   fi
-  swift package $swiftPackageShowDependenciesArguments
+
+  if isTrue "$flattened"; then
+    __convert-json --format FlattenedJSON
+  else
+    swift package $swiftPackageShowDependenciesArguments
+  fi
 }
 
 function __convert-json() {
@@ -160,14 +173,22 @@ function __convert-json() {
   if [[ -n "${localParsedArguments[(i)-f]}" ]]; then
     outputFormat="${localParsedArguments[-f]#=}"
   fi
-  if [[ "$outputFormat" != "DOT" ]] && [[ "$outputFormat" != "Mermaid" ]]; then
+
+  local outputFormatName="$outputFormat"
+  if [[ "$outputFormat" = "DOT" ]]; then
+    outputFormatName="DOT format"
+  elif [[ "$outputFormat" = "FlattenedJSON" ]]; then
+    outputFormatName="Flattened JSON"
+  elif [[ "$outputFormat" = "Mermaid" ]]; then
+    outputFormatName="Mermaid format"
+  else
     assertionFailed "Unexpected format: $outputFormat" ${(%):-%I}
   fi
 
   local -r tmpFilePath=$(mktemp)
   dep-json >"$tmpFilePath"
 
-  verbosePrint "Converting JSON to ${outputFormat} format..."
+  verbosePrint "Converting JSON to ${outputFormatName}..."
   env \
     VERBOSE_MODE="${commonParsedArguments[verbose]}" \
     JSON_PATH="$tmpFilePath" \
@@ -190,11 +211,13 @@ func verbosePrint(_ message: String) {
 
 enum OutputFormat {
   case dot
+  case flattenedJSON
   case mermaid
 
   init?(rawValue: String) {
     switch rawValue.lowercased() {
     case "dot": self = .dot
+    case "flattenedjson": self = .flattenedJSON
     case "mermaid": self = .mermaid
     default: return nil
     }
@@ -204,7 +227,7 @@ guard let outputFormat = OutputFormat(rawValue: env["OUTPUT_FORMAT"]!) else {
   fatalError("Unexpected format?!")
 }
 
-struct PackageInfo: Decodable {
+struct PackageInfo: Codable {
   let identity: String
   let name: String
   let url: String
@@ -225,24 +248,24 @@ let rootPackage = try decoder.decode(PackageInfo.self, from: Data(json.utf8))
 var allPackages: Array<PackageInfo> = []
 var allLinks: Array<DependencyLink> = []
 
-func appendPackage(_ package: PackageInfo) {
-  if allPackages.allSatisfy({ $0.identity != package.identity }) {
-    verbosePrint("Package: \(package.identity)(\(package.name))")
-    allPackages.append(package)
-  }
-}
-
-func appendLink(from: PackageInfo, to: PackageInfo) {
-  if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
-    verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
-    allLinks.append(DependencyLink(from: from, to: to))
-  }
-}
-
 func walkDependencies(of package: PackageInfo) {
-  appendPackage(package)
+  func __appendPackage(_ package: PackageInfo) {
+    if allPackages.allSatisfy({ $0.identity != package.identity }) {
+      verbosePrint("Package: \(package.identity)(\(package.name))")
+      allPackages.append(package)
+    }
+  }
+
+  func __appendLink(from: PackageInfo, to: PackageInfo) {
+    if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
+      verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
+      allLinks.append(DependencyLink(from: from, to: to))
+    }
+  }
+
+  __appendPackage(package)
   for dependency in package.dependencies {
-    appendLink(from: package, to: dependency)
+    __appendLink(from: package, to: dependency)
     walkDependencies(of: dependency)
   }
 }
@@ -302,6 +325,19 @@ func printDOT() {
   print("}")
 }
 
+func printFlattenedJSON() throws {
+  verbosePrint("Flattening JSON...")
+
+  let encoder = JSONEncoder()
+  encoder.outputFormatting = [
+    .prettyPrinted,
+    .withoutEscapingSlashes,
+  ]
+
+  let jsonData = try encoder.encode(allPackages)
+  try FileHandle.standardOutput.write(contentsOf: jsonData)
+}
+
 func printMermaid() {
   MERMAID_HEADER: do {
     print("---")
@@ -342,6 +378,7 @@ func printMermaid() {
 
 switch outputFormat {
 case .dot: printDOT()
+case .flattenedJSON: try printFlattenedJSON()
 case .mermaid: printMermaid()
 }
 
