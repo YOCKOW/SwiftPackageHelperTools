@@ -25,6 +25,7 @@ declare -A commonParsedArguments=(
   [verbose]="false"
 )
 declare -r -A subcommands=(
+  [collect-licenses]='Collects licenses of packages which the root package depends on.'
   [dep-json]='Prints the resolved dependency graph with JSON format.
               This is equivalent to `swift package show-dependencies --format json`.'
   [dep-pretty-dot]='Prints the resolved dependency graph with DOT format.'
@@ -143,7 +144,9 @@ function __handle-json() {
   fi
 
   local actionMessage=""
-  if [[ "$actionType" = "print-dot" ]]; then
+  if [[ "$actionType" = "collect-licenses" ]]; then
+    actionMessage="Collecting licenses"
+  elif [[ "$actionType" = "print-dot" ]]; then
     actionMessage="Converting JSON to DOT format"
   elif [[ "$actionType" = "print-flattened-json" ]]; then
     actionMessage="Converting nested JSON to flattend JSON"
@@ -171,6 +174,18 @@ let isVerbose: Bool = env["VERBOSE_MODE"]?.lowercased() == "true"
 let jsonPath = env["JSON_PATH"]!
 let json = try String(contentsOfFile: jsonPath, encoding: .utf8)
 
+func printError(_ message: String) {
+  try? FileHandle.standardError.write(
+    contentsOf: Data("\u{1B}[31merror:\u{1B}[m \(message)\n".utf8)
+  )
+}
+
+func printWarning(_ message: String) {
+  try? FileHandle.standardError.write(
+    contentsOf: Data("\u{1B}[33mwarning:\u{1B}[m \(message)\n".utf8)
+  )
+}
+
 func verbosePrint(_ message: String) {
   guard isVerbose else { return }
   try? FileHandle.standardError.write(
@@ -179,12 +194,14 @@ func verbosePrint(_ message: String) {
 }
 
 enum ActionType {
+  case collectLicenses
   case printDOT
   case printFlattenedJSON
   case printMermaid
 
   init?(rawValue: String) {
     switch rawValue {
+    case "collect-licenses": self = .collectLicenses
     case "print-dot": self = .printDOT
     case "print-flattened-json": self = .printFlattenedJSON
     case "print-mermaid": self = .printMermaid
@@ -210,56 +227,243 @@ struct DependencyLink {
   let to: PackageInfo
 }
 
+struct GraphSource {
+  let allPackages: Array<PackageInfo>
+  let allLinks: Array<DependencyLink>
+  let terminals: Array<PackageInfo>
+}
+
+struct JSONHandlerError: Error {
+  let message: String
+}
+
 verbosePrint("Decoding JSON...")
 let decoder = JSONDecoder()
 let rootPackage = try decoder.decode(PackageInfo.self, from: Data(json.utf8))
+let graphSource = ({ () -> GraphSource in
+  var allPackages: Array<PackageInfo> = []
+  var allLinks: Array<DependencyLink> = []
 
-var allPackages: Array<PackageInfo> = []
-var allLinks: Array<DependencyLink> = []
+  func walkDependencies(of package: PackageInfo) {
+    func __appendPackage(_ package: PackageInfo) {
+      if allPackages.allSatisfy({ $0.identity != package.identity }) {
+        verbosePrint("Package: \(package.identity)(\(package.name))")
+        allPackages.append(package)
+      }
+    }
 
-func walkDependencies(of package: PackageInfo) {
-  func __appendPackage(_ package: PackageInfo) {
-    if allPackages.allSatisfy({ $0.identity != package.identity }) {
-      verbosePrint("Package: \(package.identity)(\(package.name))")
-      allPackages.append(package)
+    func __appendLink(from: PackageInfo, to: PackageInfo) {
+      if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
+        verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
+        allLinks.append(DependencyLink(from: from, to: to))
+      }
+    }
+
+    __appendPackage(package)
+    for dependency in package.dependencies {
+      __appendLink(from: package, to: dependency)
+      walkDependencies(of: dependency)
     }
   }
 
-  func __appendLink(from: PackageInfo, to: PackageInfo) {
-    if allLinks.allSatisfy({ $0.from.identity != from.identity || $0.to.identity != to.identity }) {
-      verbosePrint("Link: \(from.identity)(\(from.name)) -> \(to.identity)(\(to.name))")
-      allLinks.append(DependencyLink(from: from, to: to))
+  walkDependencies(of: rootPackage)
+
+  allPackages.sort(by: { $0.identity < $1.identity })
+  allLinks.sort(by: {
+    if $0.from.identity < $1.from.identity {
+      return true
     }
-  }
-
-  __appendPackage(package)
-  for dependency in package.dependencies {
-    __appendLink(from: package, to: dependency)
-    walkDependencies(of: dependency)
-  }
-}
-
-walkDependencies(of: rootPackage)
-
-allPackages.sort(by: { $0.identity < $1.identity })
-allLinks.sort(by: {
-  if $0.from.identity < $1.from.identity {
-    return true
-  }
-  if $0.from.identity > $1.from.identity {
+    if $0.from.identity > $1.from.identity {
+      return false
+    }
+    if $0.to.identity < $1.to.identity {
+      return true
+    }
     return false
-  }
-  if $0.to.identity < $1.to.identity {
-    return true
-  }
-  return false
-})
+  })
 
-var terminals = allPackages
-for link in allLinks {
-  terminals.removeAll(where: { $0.identity == link.from.identity })
+  var terminals = allPackages
+  for link in allLinks {
+    terminals.removeAll(where: { $0.identity == link.from.identity })
+  }
+  verbosePrint("Terminal packages: \(terminals.map(\.identity).joined(separator: ", "))")
+
+  return GraphSource(
+    allPackages: allPackages,
+    allLinks: allLinks,
+    terminals: terminals
+  )
+})()
+var allPackages: Array<PackageInfo> { graphSource.allPackages }
+var allLinks: Array<DependencyLink> { graphSource.allLinks }
+var terminals: Array<PackageInfo> { graphSource.terminals }
+
+let jsonEncoder: JSONEncoder = ({
+  let encoder = JSONEncoder()
+  encoder.outputFormatting = [
+    .prettyPrinted,
+    .withoutEscapingSlashes,
+  ]
+  return encoder
+})()
+let fileManager = FileManager.default
+
+/* ***** Each Action ***** */
+
+func collectLicenses() throws {
+  struct __LicenseMetadata: Encodable {
+    let name: String
+    let url: String?
+    let version: String?
+    let filenames: [String: String]
+  }
+
+  func __isExistingDirectory(at path: URL) -> Bool {
+    var isDir: ObjCBool = false
+    let result = fileManager.fileExists(atPath: path.path, isDirectory: &isDir)
+    return result && isDir.boolValue
+  }
+
+  func __isExistingFile(at path: URL) -> Bool {
+    var isDir: ObjCBool = false
+    let result = fileManager.fileExists(atPath: path.path, isDirectory: &isDir)
+    return result && !(isDir.boolValue)
+  }
+
+  func __isLicenseFile(forFilename filename: String) -> Bool {
+    let uppercasedFilename = filename.uppercased()
+
+    func ____matchesWithOrWithoutFileExtension(_ string: String) -> Bool {
+      return (
+        uppercasedFilename == string ||
+        uppercasedFilename.hasPrefix("\(string).")
+      )
+    }
+
+    return [
+      "COPYING",
+      "COPYRIGHT",
+      "LICENSE",
+      "NOTICE",
+    ].contains(where: ____matchesWithOrWithoutFileExtension)
+  }
+
+  func __convertLicenseFilename(_ filename: String, for package: PackageInfo) -> String {
+    let splitted = filename.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true)
+    let filenameCore = splitted[0]
+    let pathExtension: Substring = splitted.count > 0 ? splitted[1] : "txt"
+    return "swift-package-\(package.identity)-\(filenameCore).\(pathExtension)"
+  }
+
+  func __write(data: Data, to path: URL) throws {
+    let tmpPath = path.appendingPathExtension("tmp")
+    if __isExistingFile(at: tmpPath) {
+      verbosePrint("Removing temporary file at \"\(tmpPath.path)\"...")
+      try fileManager.removeItem(at: tmpPath)
+    }
+
+    if !__isExistingFile(at: path) {
+      guard fileManager.createFile(atPath: path.path, contents: data) else {
+        throw JSONHandlerError(message: "Failed to create a file at \"\(path.path)\".")
+      }
+      return
+    }
+
+    verbosePrint("Writing data to \"\(tmpPath.path)\"...")
+    guard fileManager.createFile(atPath: tmpPath.path, contents: data) else {
+      throw JSONHandlerError(message: "Failed to create a file at \"\(tmpPath.path)\".")
+    }
+    verbosePrint("Moving file at \"\(tmpPath.path)\" to \"\(path.path)\"...")
+    try fileManager.removeItem(at: path)
+    try fileManager.moveItem(at: tmpPath, to: path)
+  }
+
+  func __copyFile(at srcPath: URL, to destPath: URL) throws {
+    verbosePrint(#"Copying "\#(srcPath.path)" to "\#(destPath.path)"..."#)
+    let tmpDestPath = destPath.appendingPathExtension("tmp")
+    if __isExistingFile(at: tmpDestPath) {
+      verbosePrint("Removing temporary file at \"\(tmpDestPath.path)\"...")
+      try fileManager.removeItem(at: tmpDestPath)
+    }
+    try fileManager.copyItem(at: srcPath, to: tmpDestPath)
+    if __isExistingFile(at: destPath) {
+      try fileManager.removeItem(at: destPath)
+    }
+    try fileManager.moveItem(at: tmpDestPath, to: destPath)
+  }
+
+  guard let licensesDirectory = env["USER_INFO__DIRECTORY"].map({ URL(filePath: $0) }),
+        __isExistingDirectory(at: licensesDirectory)
+  else {
+    fatalError("Missing directory?!")
+  }
+  verbosePrint("License files will be saved in the directory at \"\(licensesDirectory.path)\".")
+
+  let saveMetadata: Bool = env["USER_INFO__SAVE_METADATA"].map({ $0 == "true" }) ?? false
+  if saveMetadata {
+    verbosePrint("Metadata files will be also saved.")
+  }
+
+  for package in allPackages where package.identity != rootPackage.identity {
+    verbosePrint("Searching license files for \(package.identity)(\(package.name))...")
+
+    let pkgPath = URL(filePath: package.path)
+    guard __isExistingDirectory(at: pkgPath) else {
+      printWarning("Directory doesn't exist at \(pkgPath.path), which should be the repository for \(package.identity)(\(package.name)).")
+      continue
+    }
+
+    let allFilenames = try fileManager.contentsOfDirectory(atPath: package.path)
+    var licenseFilenames: [String] = []
+    for filename in allFilenames {
+      let filePath = pkgPath.appending(component: filename)
+      guard __isExistingFile(at: filePath) else {
+        verbosePrint("Skipping \"\(filename)\" because it is not a file...")
+        continue
+      }
+      if __isLicenseFile(forFilename: filename) {
+        verbosePrint("License file found: \"\(filename)\".")
+        licenseFilenames.append(filename)
+      } else {
+        verbosePrint("\"\(filename)\" doesn't seem to be a license file.")
+      }
+    }
+    if licenseFilenames.isEmpty {
+      printWarning("No license files found for \(package.identity)(\(package.name)).")
+      continue
+    }
+
+    let metadata = __LicenseMetadata(
+      name: package.name,
+      url: package.url,
+      version: package.version == "unspecified" ? nil : package.version,
+      filenames: Dictionary<String, String>(
+        uniqueKeysWithValues: licenseFilenames.map {
+          ($0, __convertLicenseFilename($0, for: package))
+        }
+      )
+    )
+    if saveMetadata {
+      verbosePrint("Saving metadata file...")
+      let metadataPath = licensesDirectory.appending(
+        component: "metadata",
+        directoryHint: .isDirectory
+      ).appending(
+        component: "swift-package-\(package.identity).json",
+        directoryHint: .notDirectory
+      )
+      let metadataJSON = try jsonEncoder.encode(metadata)
+      try __write(data: metadataJSON, to: metadataPath)
+    }
+
+    for (originalFilename, convertedFilename) in metadata.filenames {
+      try __copyFile(
+        at: pkgPath.appending(component: originalFilename),
+        to: licensesDirectory.appending(component: convertedFilename)
+      )
+    }
+  }
 }
-verbosePrint("Terminal packages: \(terminals.map(\.identity).joined(separator: ", "))")
 
 func printDOT() {
   verbosePrint("Generating DOT graph...")
@@ -297,13 +501,7 @@ func printDOT() {
 func printFlattenedJSON() throws {
   verbosePrint("Flattening JSON...")
 
-  let encoder = JSONEncoder()
-  encoder.outputFormatting = [
-    .prettyPrinted,
-    .withoutEscapingSlashes,
-  ]
-
-  let jsonData = try encoder.encode(allPackages)
+  let jsonData = try jsonEncoder.encode(allPackages)
   try FileHandle.standardOutput.write(contentsOf: jsonData)
 }
 
@@ -345,10 +543,19 @@ func printMermaid() {
   print("")
 }
 
-switch actionType {
-case .printDOT: printDOT()
-case .printFlattenedJSON: try printFlattenedJSON()
-case .printMermaid: printMermaid()
+do {
+  switch actionType {
+  case .collectLicenses: try collectLicenses()
+  case .printDOT: printDOT()
+  case .printFlattenedJSON: try printFlattenedJSON()
+  case .printMermaid: printMermaid()
+  }
+} catch let jsonHandlerError as JSONHandlerError {
+  printError(jsonHandlerError.message)
+  throw jsonHandlerError
+} catch {
+  print(error.localizedDescription)
+  throw error
 }
 
 ____JSON_HANDLER_SWIFT_CODE____
@@ -356,6 +563,63 @@ ____JSON_HANDLER_SWIFT_CODE____
 
 # Subcommands
 ################################################################################
+
+function collect-licenses() {
+  if shouldViewHelp; then
+    echo "[OVERVIEW]"
+    echo "${subcommands[collect-licenses]}"
+    echo
+    viewCommonOptions
+    echo
+    echo "[OPTIONS]"
+    echo "    -d/--directory <path>:"
+    echo "        Path to the directory where license files are saved."
+    echo "    --metadata: Save also metadata files."
+    echo "    -y/--yes: Assume Yes on all queries."
+    return 0
+  fi
+
+  local -A localParsedArguments=()
+  zparseopts -D -E -M -A localParsedArguments -- \
+    d: -directory:=d \
+    -metadata -save-metadata=-metadata \
+    y -yes=y -assume-yes=y
+
+  local licensesDirectory=""
+  local saveMetadata="false"
+  local assumeYes="false"
+  if [[ -n "${localParsedArguments[(i)-d]}" ]]; then
+    licensesDirectory="${localParsedArguments[-d]#=}"
+  fi
+  if [[ -n "${localParsedArguments[(i)--metadata]}" ]]; then
+    saveMetadata="true"
+  fi
+  if [[ -n "${localParsedArguments[(i)-y]}" ]]; then
+    assumeYes="true"
+    verbosePrint "Assume Yes: true"
+  fi
+
+  if [[ -d "$licensesDirectory" ]]; then
+    if ! isTrue "$assumeYes"; then
+      printWarning "Are you sure the license files will be overwritten in the directory \"$licensesDirectory\"? [y/N]"
+      if ! read -q; then
+        verbosePrint "Operation Aborted."
+        return 0
+      fi
+    fi
+  else
+    verbosePrint "Creating directory at \"$licensesDirectory\"..."
+    mkdir -p "$licensesDirectory"
+  fi
+  if isTrue "$saveMetadata"; then
+    mkdir -p "${licensesDirectory}/metadata"
+  fi
+
+  export USER_INFO__DIRECTORY="$(cd "$licensesDirectory" && pwd)"
+  export USER_INFO__SAVE_METADATA="$saveMetadata"
+
+  __handle-json --action collect-licenses
+}
 
 function dep-json() {
   local -A localParsedArguments=()
