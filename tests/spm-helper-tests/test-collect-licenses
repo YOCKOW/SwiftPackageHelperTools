@@ -1,0 +1,27 @@
+#!/usr/bin/env zsh
+
+################################################################################
+# test-collect-licenses
+#   © 2025 YOCKOW.
+#     Licensed under MIT License.
+#     See "LICENSE.txt" for more information.
+################################################################################
+
+set -u
+
+declare -r licensesDir=$(mktemp -d)
+
+spm-helper collect-licenses \
+    --package-path "$HT_PACKAGE_DIR" \
+    --directory "$licensesDir" \
+    --save-metadata
+
+cat "${licensesDir}/swift-package-swiftranges-LICENSE.txt" \
+  | grep YOCKOW >/dev/null \
+  || SSTFail "Expected SwiftRanges' License File" -l ${(%):-%I}
+
+cat "${licensesDir}/metadata/swift-package-swiftcgiresponder.json" \
+  | grep '"https://github.com/YOCKOW/SwiftCGIResponder.git"' >/dev/null \
+  || SSTFail "Expected SwiftCGIResponder's License Metadata File" -l ${(%):-%I}
+
+rm -rf "$licensesDir"

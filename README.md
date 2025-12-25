@@ -20,6 +20,18 @@ You can invoke subcommands through `spm-helper`:
 spm-helper <subcommand> [options]
 ```
 
+
+### `collect-licenses`
+
+This subcommand collects licenses of packages which the root package depends on.
+
+Sample command:
+
+```console
+spm-helper collect-licenses --package-path . --directory /my/path/to/licenses
+```
+
+
 ### `dep-json`
 
 This subcommand prints the resolved dependency graph with JSON format.  
