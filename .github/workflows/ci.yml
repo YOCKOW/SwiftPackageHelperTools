@@ -24,4 +24,4 @@ jobs:
     uses: YOCKOW/SSTest/.github/workflows/reusable-SSTest.yml@v1.3
     with:
       os: ${{ matrix.os }}
-      swift-version: 6.2.1
+      swift-version: "6.2.3"
