@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SPM_HELPER_REPO_URL: "https://GitHub.com/YOCKOW/SwiftPackageHelperTools.git"
+      SPM_HELPER_REPO_TAG: v1
       PACKAGE_PATH: ${{ inputs.package-path }}
       DOT_FILE: ${{ inputs.dot-file }}
       DOT_DERIVED_SVG_FILE: ${{ inputs.dot-derived-svg-file }}
@@ -125,7 +126,7 @@ jobs:
           declare -r spmHelperRepoDir="$WORKSPACE/spm-helper-repo"
           gh repo clone \
             "$SPM_HELPER_REPO_URL" "${spmHelperRepoDir}" \
-            -- -b "v0.0.1" --depth 1
+            -- -b "$SPM_HELPER_REPO_TAG" --depth 1
           echo "${spmHelperRepoDir}/bin" >>"$GITHUB_PATH"
       - name: Check out the repository
         uses: actions/checkout@v6
