@@ -599,7 +599,7 @@ function collect-licenses() {
     verbosePrint "Assume Yes: true"
   fi
 
-  if [[ -d "$licensesDirectory" ]]; then
+  if [[ -d "$licensesDirectory" ]] && [[ -n "$(ls -A "$licensesDirectory")" ]]; then
     if ! isTrue "$assumeYes"; then
       printWarning "Are you sure the license files will be overwritten in the directory \"$licensesDirectory\"? [y/N]"
       if ! read -q; then
